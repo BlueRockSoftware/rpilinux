@@ -3257,6 +3257,9 @@ Params: speed                   Display SPI bus speed
 
         xohms                   Touchpanel sensitivity (X-plate resistance)
 
+        drm                     Select the DRM/KMS driver instead of the FBTFT
+                                one
+
 
 Name:   piscreen2r
 Info:   PiScreen 2 with resistive TP display by OzzMaker.com
