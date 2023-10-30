@@ -2419,6 +2419,18 @@ Params: rotation                Mounting rotation of the camera sensor (0 or
                                 Compute Module (CSI0, i2c_vc, and cam0_reg).
 
 
+Name:   interludeaudio-analog
+Info:   Configures Interlude Audio Analog Hat audio card
+Load:   dtoverlay=interludeaudio-analog,<param>=<val>
+Params: gpiopin                 GPIO pin for codec reset
+
+
+Name:   interludeaudio-digital
+Info:   Configures Interlude Audio Digital Hat audio card
+Load:   dtoverlay=interludeaudio-digital
+Params: <None>
+
+
 Name:   iqaudio-codec
 Info:   Configures the IQaudio Codec audio card
 Load:   dtoverlay=iqaudio-codec
