@@ -14,44 +14,43 @@ on:
 env:
   NUM_JOBS: 3
 
+permissions:
+  write-all
+
 jobs:
+  create_release:
+    runs-on: ubuntu-latest
+
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+
+    steps:
+    - name: Get Commit SHA
+      id: get-commit-sha
+      run: echo "::set-output name=commit_sha::$(echo ${{ github.sha }} | cut -c -7)"
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.get-commit-sha.outputs.commit_sha }}
+        release_name: Release ${{ steps.get-commit-sha.outputs.commit_sha }}
+        draft: false
+        prerelease: false
+
   build:
     runs-on: ubuntu-latest
+    needs: create_release
     strategy:
       matrix:
         include:
-          - name: bcm2835
-            arch: arm
-            defconfig: bcm2835_defconfig
-            kernel: kernel
-
-          - name: arm64
-            arch: arm64
-            defconfig: defconfig
-            kernel: kernel8
-
-          - name: bcmrpi
-            arch: arm
-            defconfig: bcmrpi_defconfig
-            kernel: kernel
-
-          - name: bcm2709
-            arch: arm
-            defconfig: bcm2709_defconfig
-            kernel: kernel7
-
           - name: bcm2711
-            arch: arm
-            defconfig: bcm2711_defconfig
-            kernel: kernel7l
-
-          - name: bcm2711_arm64
-            arch: arm64
             defconfig: bcm2711_defconfig
             kernel: kernel8
 
           - name: bcm2712
-            arch: arm64
             defconfig: bcm2712_defconfig
             kernel: kernel_2712
 
@@ -62,11 +61,7 @@ jobs:
 
     - name: Install toolchain
       run:
-        if [[ "${{matrix.arch}}" == "arm64" ]]; then
-          sudo apt-get install gcc-aarch64-linux-gnu;
-        else
-          sudo apt-get install gcc-arm-linux-gnueabihf;
-        fi
+        sudo apt-get install gcc-aarch64-linux-gnu;
       timeout-minutes: 5
 
     - uses: actions/checkout@v3
@@ -77,25 +72,17 @@ jobs:
     - name: Build kernel ${{matrix.name}}
       run: |
         mkdir ${{github.workspace}}/build
-        export ARCH=${{matrix.arch}}
-        if [[ "$ARCH" == "arm64" ]]; then
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export DTS_SUBDIR=broadcom
-          export IMAGE=Image.gz
-        else
-          export CROSS_COMPILE=arm-linux-gnueabihf-
-          export DTS_SUBDIR=
-          export IMAGE=zImage
-        fi
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
         make O=${{github.workspace}}/build ${{matrix.defconfig}}
         scripts/config --file ${{github.workspace}}/build/.config --set-val CONFIG_WERROR y
-        make O=${{github.workspace}}/build -j ${{env.NUM_JOBS}} $IMAGE modules dtbs
-        mkdir -p ${{github.workspace}}/install/boot/overlays
+        make O=${{github.workspace}}/build -j ${{env.NUM_JOBS}} Image modules dtbs
+        mkdir -p ${{github.workspace}}/install/boot/firmware/overlays
         make O=${{github.workspace}}/build INSTALL_MOD_PATH=${{github.workspace}}/install modules_install
-        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/${DTS_SUBDIR}/*.dtb ${{github.workspace}}/install/boot/
-        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/overlays/*.dtb* ${{github.workspace}}/install/boot/overlays/
-        cp ${{github.workspace}}/arch/${ARCH}/boot/dts/overlays/README ${{github.workspace}}/install/boot/overlays/
-        cp ${{github.workspace}}/build/arch/${ARCH}/boot/$IMAGE ${{github.workspace}}/install/boot/${{matrix.kernel}}.img
+        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/broadcom/*.dtb ${{github.workspace}}/install/boot/firmware/
+        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/overlays/*.dtb* ${{github.workspace}}/install/boot/firmware/overlays/
+        cp ${{github.workspace}}/arch/${ARCH}/boot/dts/overlays/README ${{github.workspace}}/install/boot/firmware/overlays/
+        cp ${{github.workspace}}/build/arch/${ARCH}/boot/Image ${{github.workspace}}/install/boot/firmware/${{matrix.kernel}}.img
 
     - name: Tar build
       run: tar -cvf ${{matrix.name}}_build.tar -C ${{github.workspace}}/install .
@@ -106,3 +93,13 @@ jobs:
         name: ${{matrix.name}}_build
         path: ${{matrix.name}}_build.tar
         retention-days: 90
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create_release.outputs.upload_url }}
+        asset_path: ${{matrix.name}}_build.tar
+        asset_name: ${{matrix.name}}_build
+        asset_content_type: application/x-tar
