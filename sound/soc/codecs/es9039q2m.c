@@ -282,7 +282,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
     int es9039q2m_probe(struct device *dev, struct regmap *regmap)
     {
         struct es9039q2m_priv *es9039q2m;
-        unsigned int id1,id2,id3,id4;
+        unsigned int id1;
         int i, ret;
 
         es9039q2m = devm_kzalloc(dev,sizeof(*es9039q2m), GPP_KERNEL);
@@ -311,5 +311,77 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
             return ret;
         }
         
-        
+        gpiod_set_value_cansleep(es9039q2m->reset, 1);
+
+        ret = regmap_read(regmap, ES9039Q2M_CHIP_ID_READ, &id1 );
+        if(ret != 0x63) {
+            dev_err(dev,"failed to read device ID: %d\n",ret);
+            return ret;
+        }
+
+        if(!es9039q2m->reset){
+            ret = es9039q2m_software_reset(es9039q2m);
+            if(ret < 0 ){
+                dev_err(dev,"Software reset failed: %d\n",ret);
+                returm ret;
+            }
+        }
+
+        ret = devm_snd_soc_register_component(dev, &es9039q2m_dac_codec_driver, &ES9039Q2M_dai, 1);
+
+        pm_runtime_set_active(dev);
+        pm_runtime_enable(dev);
+        pm_runtime_idle(dev);
+
+        return 0;
+
+
     }
+    EXPORT_SYMBOL_GPL(ES9039A2M_probe);
+
+    void es9039q2m_remove(struct device *dev)
+    {
+        pm_runtime_disable(dev);
+    }
+    EXPORT_SYMBOL_GPL(ES9039Q2M_remove);
+
+    #if IS_ENABLED(CONFIG_PM)
+    static int es9039q2m_runtime_resune(struct device *dev)
+    {
+        struct es9039q2m_priv *es9039q2m = dev_get_drvdata(dev);
+        int ret;
+
+        ret = regulator_bulk_enable(ARRAY_SIZE(es9039q2m->supplies), es9039q2m->supplies);
+
+        if(ret){
+            dev_err(es9039q2m->dev,"failed to enable supplies: %d\n",ret);
+            return ret;
+
+        }
+
+        regcache_sync(es9039q2m->regmap);
+
+        return 0;
+    }
+
+    static int es9039q2m_runtime_suspend(struct device *dev)
+    {
+        struct es9039q2m_priv *es9039q2m = dev_get_drvdata(dev);
+
+        regulator_bulk_disable(ARRAY_SIZE(es9039q2m->supplies),es9039q2m->supplies);
+
+        return 0;
+
+    }
+
+    #endif
+    
+    const struct dev_pm_ops es9039q2m_pm = {
+        SET_RUNTIME_PM_OPS(es9039q2m_runtime_suspend, es9039q2m_runtime_resune, NULL)
+    };
+    EXPORT_SYMBOL_GPL(es9039q2m_pm);
+
+    MODULE_DESCRIPTION("ES9039Q2M DaC driver");
+    MODULE_AUTHOR("Yash Gandhi yash@bluerocksoft.com");
+    MODULE_LICENSE("GPL");
+    
