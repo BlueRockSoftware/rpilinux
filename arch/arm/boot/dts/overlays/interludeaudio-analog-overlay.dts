@@ -12,7 +12,7 @@
 			i2s-controller = <&i2s_clk_consumer>;
 			status = "okay";
 
-			simple-audio-card,name = "snd_interlude_audio_analog";
+			simple-audio-card,name = "snd_IA_analog";
 
 			simple-audio-card,widgets =
 				"Line", "Line In",
