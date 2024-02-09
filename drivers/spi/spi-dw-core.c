@@ -244,8 +244,11 @@ static irqreturn_t dw_spi_transfer_handler(struct dw_spi *dws)
 	 */
 	if (irq_status & DW_SPI_INT_TXEI) {
 		dw_writer(dws);
-		if (!dws->tx_len)
+		if (!dws->tx_len) {
 			dw_spi_mask_intr(dws, DW_SPI_INT_TXEI);
+			if (!dws->rx_len)
+				spi_finalize_current_transfer(dws->master);
+		}
 	}
 
 	return IRQ_HANDLED;
@@ -372,8 +375,11 @@ static void dw_spi_irq_setup(struct dw_spi *dws)
 
 	dws->transfer_handler = dw_spi_transfer_handler;
 
-	imask = DW_SPI_INT_TXEI | DW_SPI_INT_TXOI |
-		DW_SPI_INT_RXUI | DW_SPI_INT_RXOI | DW_SPI_INT_RXFI;
+	imask = 0;
+	if (dws->tx_len)
+		imask |= DW_SPI_INT_TXEI | DW_SPI_INT_TXOI;
+	if (dws->rx_len)
+		imask |= DW_SPI_INT_RXUI | DW_SPI_INT_RXOI | DW_SPI_INT_RXFI;
 	dw_spi_umask_intr(dws, imask);
 }
 
@@ -426,7 +432,10 @@ static int dw_spi_transfer_one(struct spi_controller *master,
 	int ret;
 
 	dws->dma_mapped = 0;
-	dws->n_bytes = DIV_ROUND_UP(transfer->bits_per_word, BITS_PER_BYTE);
+	dws->n_bytes =
+		roundup_pow_of_two(DIV_ROUND_UP(transfer->bits_per_word,
+						BITS_PER_BYTE));
+
 	dws->tx = (void *)transfer->tx_buf;
 	dws->tx_len = transfer->len / dws->n_bytes;
 	dws->rx = transfer->rx_buf;

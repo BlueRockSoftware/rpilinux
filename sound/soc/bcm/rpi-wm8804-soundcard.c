@@ -382,7 +382,7 @@ static int snd_interlude_audio_digital_probe(struct platform_device *pdev)
 
 
 static struct snd_rpi_wm8804_drvdata drvdata_interlude_audio_digital = {
-	.card_name = "snd_interlude_audio_digital_hat",
+	.card_name = "snd_IA_Digital_Hat",
 	.dai       = snd_interlude_audio_digital_dai,
 	.probe     = snd_interlude_audio_digital_probe,
 };

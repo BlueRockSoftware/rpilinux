@@ -76,7 +76,7 @@ struct brcm_usb_phy_data {
 };
 
 static s8 *node_reg_names[BRCM_REGS_MAX] = {
-	"crtl", "xhci_ec", "xhci_gbl", "usb_phy", "usb_mdio", "bdc_ec"
+	"ctrl", "xhci_ec", "xhci_gbl", "usb_phy", "usb_mdio", "bdc_ec"
 };
 
 static int brcm_pm_notifier(struct notifier_block *notifier,
@@ -315,6 +315,18 @@ static const struct match_chip_info chip_info_7211b0 = {
 	.optional_reg = BRCM_REGS_BDC_EC,
 };
 
+static const struct match_chip_info chip_info_2712 = {
+	.init_func = &brcm_usb_dvr_init_2712,
+	.required_regs = {
+		BRCM_REGS_CTRL,
+		BRCM_REGS_XHCI_EC,
+		BRCM_REGS_XHCI_GBL,
+		BRCM_REGS_USB_MDIO,
+		-1,
+	},
+	.optional_reg = BRCM_REGS_BDC_EC,
+};
+
 static const struct match_chip_info chip_info_7445 = {
 	.init_func = &brcm_usb_dvr_init_7445,
 	.required_regs = {
@@ -336,6 +348,10 @@ static const struct of_device_id brcm_usb_dt_ids[] = {
 	{
 		.compatible = "brcm,bcm7211-usb-phy",
 		.data = &chip_info_7211b0,
+	},
+	{
+		.compatible = "brcm,bcm2712-usb-phy",
+		.data = &chip_info_2712,
 	},
 	{
 		.compatible = "brcm,brcmstb-usb-phy",
@@ -445,9 +461,9 @@ static int brcm_usb_phy_dvr_init(struct platform_device *pdev,
 		priv->suspend_clk = NULL;
 	}
 
-	priv->wake_irq = platform_get_irq_byname(pdev, "wake");
+	priv->wake_irq = platform_get_irq_byname_optional(pdev, "wake");
 	if (priv->wake_irq < 0)
-		priv->wake_irq = platform_get_irq_byname(pdev, "wakeup");
+		priv->wake_irq = platform_get_irq_byname_optional(pdev, "wakeup");
 	if (priv->wake_irq >= 0) {
 		err = devm_request_irq(dev, priv->wake_irq,
 				       brcm_usb_phy_wake_isr, 0,

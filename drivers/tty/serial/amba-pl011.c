@@ -152,6 +152,20 @@ static const struct vendor_data vendor_sbsa = {
 	.fixed_options		= true,
 };
 
+static struct vendor_data vendor_arm_axi = {
+	.reg_offset		= pl011_std_offsets,
+	.ifls			= UART011_IFLS_RX4_8 | UART011_IFLS_TX4_8,
+	.fr_busy		= UART01x_FR_BUSY,
+	.fr_dsr			= UART01x_FR_DSR,
+	.fr_cts			= UART01x_FR_CTS,
+	.fr_ri			= UART011_FR_RI,
+	.oversampling		= false,
+	.dma_threshold		= false,
+	.cts_event_workaround	= false,
+	.always_enabled		= false,
+	.fixed_options		= false,
+};
+
 #ifdef CONFIG_ACPI_SPCR_TABLE
 static const struct vendor_data vendor_qdt_qdf2400_e44 = {
 	.reg_offset		= pl011_std_offsets,
@@ -1730,23 +1744,6 @@ static void pl011_put_poll_char(struct uart_port *port,
 
 #endif /* CONFIG_CONSOLE_POLL */
 
-unsigned long pl011_clk_round(unsigned long clk)
-{
-	unsigned long scaler;
-
-	/*
-	 * If increasing a clock by less than 0.1% changes it
-	 * from ..999.. to ..000.., round up.
-	 */
-	scaler = 1;
-	while (scaler * 100000 < clk)
-		scaler *= 10;
-	if ((clk + scaler - 1)/scaler % 1000 == 0)
-		clk = (clk/scaler + 1) * scaler;
-
-	return clk;
-}
-
 static int pl011_hwinit(struct uart_port *port)
 {
 	struct uart_amba_port *uap =
@@ -1763,7 +1760,7 @@ static int pl011_hwinit(struct uart_port *port)
 	if (retval)
 		return retval;
 
-	uap->port.uartclk = pl011_clk_round(clk_get_rate(uap->clk));
+	uap->port.uartclk = clk_get_rate(uap->clk);
 
 	/* Clear pending error and receive interrupts */
 	pl011_write(UART011_OEIS | UART011_BEIS | UART011_PEIS |
@@ -2454,7 +2451,7 @@ static int pl011_console_setup(struct console *co, char *options)
 			plat->init();
 	}
 
-	uap->port.uartclk = pl011_clk_round(clk_get_rate(uap->clk));
+	uap->port.uartclk = clk_get_rate(uap->clk);
 
 	if (uap->vendor->fixed_options) {
 		baud = uap->fixed_baud;
@@ -2671,7 +2668,6 @@ static struct uart_driver amba_reg = {
 	.cons			= AMBA_CONSOLE,
 };
 
-#if 0
 static int pl011_probe_dt_alias(int index, struct device *dev)
 {
 	struct device_node *np;
@@ -2703,7 +2699,6 @@ static int pl011_probe_dt_alias(int index, struct device *dev)
 
 	return ret;
 }
-#endif
 
 /* unregisters the driver also if no more ports are left */
 static void pl011_unregister_port(struct uart_amba_port *uap)
@@ -2755,12 +2750,7 @@ static int pl011_setup_port(struct device *dev, struct uart_amba_port *uap,
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
-	/* Don't use DT serial<n> aliases - it causes the device to
-	   be renumbered to ttyAMA1 if it is the second serial port in the
-	   system, even though the other one is ttyS0. The 8250 driver
-	   doesn't use this logic, so always remains ttyS0.
 	index = pl011_probe_dt_alias(index, dev);
-	*/
 
 	uap->port.dev = dev;
 	uap->port.mapbase = mmiobase->start;
@@ -3000,6 +2990,86 @@ static struct platform_driver arm_sbsa_uart_platform_driver = {
 	},
 };
 
+static int pl011_axi_probe(struct platform_device *pdev)
+{
+	struct uart_amba_port *uap;
+	struct vendor_data *vendor =  &vendor_arm_axi;
+	struct resource *r;
+	unsigned int periphid;
+	int portnr, ret, irq;
+
+	portnr = pl011_find_free_port();
+	if (portnr < 0)
+		return portnr;
+
+	uap = devm_kzalloc(&pdev->dev, sizeof(struct uart_amba_port),
+			   GFP_KERNEL);
+	if (!uap)
+		return -ENOMEM;
+
+	uap->clk = devm_clk_get(&pdev->dev, NULL);
+	if (IS_ERR(uap->clk))
+		return PTR_ERR(uap->clk);
+
+	if (of_property_read_bool(pdev->dev.of_node, "cts-event-workaround")) {
+		vendor->cts_event_workaround = true;
+		dev_info(&pdev->dev, "cts_event_workaround enabled\n");
+	}
+
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return irq;
+
+	periphid = 0x00241011; /* A safe default */
+	of_property_read_u32(pdev->dev.of_node, "arm,primecell-periphid",
+			     &periphid);
+
+	uap->reg_offset = vendor->reg_offset;
+	uap->vendor = vendor;
+	uap->fifosize = (AMBA_REV_BITS(periphid) < 3) ? 16 : 32;
+	uap->port.iotype = vendor->access_32b ? UPIO_MEM32 : UPIO_MEM;
+	uap->port.irq = irq;
+	uap->port.ops = &amba_pl011_pops;
+
+	snprintf(uap->type, sizeof(uap->type), "PL011 AXI");
+
+	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+
+	ret = pl011_setup_port(&pdev->dev, uap, r, portnr);
+	if (ret)
+		return ret;
+
+	platform_set_drvdata(pdev, uap);
+
+	return pl011_register_port(uap);
+}
+
+static int pl011_axi_remove(struct platform_device *pdev)
+{
+	struct uart_amba_port *uap = platform_get_drvdata(pdev);
+
+	uart_remove_one_port(&amba_reg, &uap->port);
+	pl011_unregister_port(uap);
+	return 0;
+}
+
+static const struct of_device_id pl011_axi_of_match[] = {
+	{ .compatible = "arm,pl011-axi" },
+	{},
+};
+MODULE_DEVICE_TABLE(of, pl011_axi_of_match);
+
+static struct platform_driver pl011_axi_platform_driver = {
+	.probe		= pl011_axi_probe,
+	.remove		= pl011_axi_remove,
+	.driver	= {
+		.name	= "pl011-axi",
+		.pm	= &pl011_dev_pm_ops,
+		.of_match_table = of_match_ptr(pl011_axi_of_match),
+		.suppress_bind_attrs = IS_BUILTIN(CONFIG_SERIAL_AMBA_PL011),
+	},
+};
+
 static const struct amba_id pl011_ids[] = {
 	{
 		.id	= 0x00041011,
@@ -3033,6 +3103,8 @@ static int __init pl011_init(void)
 
 	if (platform_driver_register(&arm_sbsa_uart_platform_driver))
 		pr_warn("could not register SBSA UART platform driver\n");
+	if (platform_driver_register(&pl011_axi_platform_driver))
+		pr_warn("could not register PL011 AXI platform driver\n");
 	return amba_driver_register(&pl011_driver);
 }
 

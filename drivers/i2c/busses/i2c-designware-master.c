@@ -228,6 +228,10 @@ static void i2c_dw_xfer_init(struct dw_i2c_dev *dev)
 		ic_tar = DW_IC_TAR_10BITADDR_MASTER;
 	}
 
+	/* Convert a zero-length read into an SMBUS quick command */
+	if (!msgs[dev->msg_write_idx].len)
+		ic_tar = DW_IC_TAR_SPECIAL | DW_IC_TAR_SMBUS_QUICK_CMD;
+
 	regmap_update_bits(dev->map, DW_IC_CON, DW_IC_CON_10BITADDR_MASTER,
 			   ic_con);
 
@@ -409,6 +413,14 @@ i2c_dw_xfer_msg(struct dw_i2c_dev *dev)
 		regmap_read(dev->map, DW_IC_RXFLR, &flr);
 		rx_limit = dev->rx_fifo_depth - flr;
 
+		/* Handle SMBUS quick commands */
+		if (!buf_len) {
+			if (msgs[dev->msg_write_idx].flags & I2C_M_RD)
+				regmap_write(dev->map, DW_IC_DATA_CMD, 0x300);
+			else
+				regmap_write(dev->map, DW_IC_DATA_CMD, 0x200);
+		}
+
 		while (buf_len > 0 && tx_limit > 0 && rx_limit > 0) {
 			u32 cmd = 0;
 
@@ -525,9 +537,21 @@ i2c_dw_read(struct dw_i2c_dev *dev)
 			u32 flags = msgs[dev->msg_read_idx].flags;
 
 			regmap_read(dev->map, DW_IC_DATA_CMD, &tmp);
+			tmp &= DW_IC_DATA_CMD_DAT;
 			/* Ensure length byte is a valid value */
-			if (flags & I2C_M_RECV_LEN &&
-			    (tmp & DW_IC_DATA_CMD_DAT) <= I2C_SMBUS_BLOCK_MAX && tmp > 0) {
+			if (flags & I2C_M_RECV_LEN) {
+				/*
+				 * if IC_EMPTYFIFO_HOLD_MASTER_EN is set, which cannot be
+				 * detected from the registers, the controller can be
+				 * disabled if the STOP bit is set. But it is only set
+				 * after receiving block data response length in
+				 * I2C_FUNC_SMBUS_BLOCK_DATA case. That needs to read
+				 * another byte with STOP bit set when the block data
+				 * response length is invalid to complete the transaction.
+				 */
+				if (!tmp || tmp > I2C_SMBUS_BLOCK_MAX)
+					tmp = 1;
+
 				len = i2c_dw_recv_len(dev, tmp);
 			}
 			*buf++ = tmp;
@@ -648,7 +672,7 @@ static const struct i2c_algorithm i2c_dw_algo = {
 };
 
 static const struct i2c_adapter_quirks i2c_dw_quirks = {
-	.flags = I2C_AQ_NO_ZERO_LEN,
+	.flags = 0,
 };
 
 static u32 i2c_dw_read_clear_intrbits(struct dw_i2c_dev *dev)
@@ -788,7 +812,8 @@ void i2c_dw_configure_master(struct dw_i2c_dev *dev)
 {
 	struct i2c_timings *t = &dev->timings;
 
-	dev->functionality = I2C_FUNC_10BIT_ADDR | DW_IC_DEFAULT_FUNCTIONALITY;
+	dev->functionality = I2C_FUNC_10BIT_ADDR | I2C_FUNC_SMBUS_QUICK |
+			     DW_IC_DEFAULT_FUNCTIONALITY;
 
 	dev->master_cfg = DW_IC_CON_MASTER | DW_IC_CON_SLAVE_DISABLE |
 			  DW_IC_CON_RESTART_EN;
