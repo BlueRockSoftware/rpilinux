@@ -189,9 +189,16 @@ static void dw_i2s_config(struct dw_i2s_dev *dev, int stream)
 {
 	struct i2s_clk_config_data *config = &dev->config;
 	u32 ch_reg;
-	u32 dmacr = 0;
+	u32 dmacr;
 
 	i2s_disable_channels(dev, stream);
+
+	dmacr = i2s_read_reg(dev->i2s_base, DMACR);
+
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK)
+		dmacr &= ~(DMACR_DMAEN_TXCH0 * 0xf);
+	else
+		dmacr &= ~(DMACR_DMAEN_RXCH0 * 0xf);
 
 	for (ch_reg = 0; ch_reg < (config->chan_nr / 2); ch_reg++) {
 		if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -210,10 +217,6 @@ static void dw_i2s_config(struct dw_i2s_dev *dev, int stream)
 			dmacr |= (DMACR_DMAEN_RXCH0 << ch_reg);
 		}
 	}
-	if (stream == SNDRV_PCM_STREAM_PLAYBACK)
-		dmacr |= DMACR_DMAEN_TX;
-	else if (stream == SNDRV_PCM_STREAM_CAPTURE)
-		dmacr |= DMACR_DMAEN_RX;
 
 	i2s_write_reg(dev->i2s_base, DMACR, dmacr);
 }
@@ -258,6 +261,25 @@ static int dw_i2s_hw_params(struct snd_pcm_substream *substream,
 	default:
 		dev_err(dev->dev, "designware-i2s: unsupported PCM fmt");
 		return -EINVAL;
+	}
+
+	if ((dev->capability & DW_I2S_MASTER) && dev->bclk_ratio) {
+		switch (dev->bclk_ratio) {
+		case 32:
+			dev->ccr = 0x00;
+			break;
+
+		case 48:
+			dev->ccr = 0x08;
+			break;
+
+		case 64:
+			dev->ccr = 0x10;
+			break;
+
+		default:
+			return -EINVAL;
+		}
 	}
 
 	config->chan_nr = params_channels(params);
@@ -319,10 +341,13 @@ static int dw_i2s_startup(struct snd_pcm_substream *substream,
 
 	dw_i2s_config(dev, substream->stream);
 	dmacr = i2s_read_reg(dev->i2s_base, DMACR);
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		dma_data = &dev->play_dma_data;
-	else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+		dmacr |= DMACR_DMAEN_TX;
+	} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
 		dma_data = &dev->capture_dma_data;
+		dmacr |= DMACR_DMAEN_RX;
+	}
 
 	snd_soc_dai_set_dma_data(cpu_dai, substream, (void *)dma_data);
 	i2s_write_reg(dev->i2s_base, DMACR, dmacr);
@@ -427,29 +452,10 @@ static int dw_i2s_set_bclk_ratio(struct snd_soc_dai *cpu_dai,
 				 unsigned int ratio)
 {
 	struct dw_i2s_dev *dev = snd_soc_dai_get_drvdata(cpu_dai);
-	struct i2s_clk_config_data *config = &dev->config;
 
 	dev_dbg(dev->dev, "%s(%d)\n", __func__, ratio);
-	if (ratio < config->data_width * 2)
-		return -EINVAL;
 
-	switch (ratio) {
-	case 32:
-		dev->ccr = 0x00;
-		break;
-
-	case 48:
-		dev->ccr = 0x08;
-		break;
-
-	case 64:
-		dev->ccr = 0x10;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	i2s_write_reg(dev->i2s_base, CCR, dev->ccr);
+	dev->bclk_ratio = ratio;
 
 	return 0;
 }
@@ -670,7 +676,7 @@ static int dw_configure_dai_by_dt(struct dw_i2s_dev *dev,
 	if (WARN_ON(idx >= ARRAY_SIZE(bus_widths)))
 		return -EINVAL;
 
-	ret = dw_configure_dai(dev, dw_i2s_dai, SNDRV_PCM_RATE_8000_192000);
+	ret = dw_configure_dai(dev, dw_i2s_dai, SNDRV_PCM_RATE_8000_384000);
 	if (ret < 0)
 		return ret;
 
@@ -743,6 +749,7 @@ static int dw_i2s_probe(struct platform_device *pdev)
 		}
 	}
 
+	dev->bclk_ratio = 0;
 	dev->i2s_reg_comp1 = I2S_COMP_PARAM_1;
 	dev->i2s_reg_comp2 = I2S_COMP_PARAM_2;
 	if (pdata) {

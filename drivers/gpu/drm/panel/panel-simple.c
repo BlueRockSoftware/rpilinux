@@ -40,6 +40,7 @@
 #include <drm/drm_edid.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_panel.h>
+#include <drm/drm_of.h>
 
 /**
  * struct panel_desc - Describes a simple panel.
@@ -2252,13 +2253,13 @@ static const struct panel_desc innolux_g070y2_t02 = {
 static const struct display_timing innolux_g101ice_l01_timing = {
 	.pixelclock = { 60400000, 71100000, 74700000 },
 	.hactive = { 1280, 1280, 1280 },
-	.hfront_porch = { 41, 80, 100 },
-	.hback_porch = { 40, 79, 99 },
-	.hsync_len = { 1, 1, 1 },
+	.hfront_porch = { 30, 60, 70 },
+	.hback_porch = { 30, 60, 70 },
+	.hsync_len = { 22, 40, 60 },
 	.vactive = { 800, 800, 800 },
-	.vfront_porch = { 5, 11, 14 },
-	.vback_porch = { 4, 11, 14 },
-	.vsync_len = { 1, 1, 1 },
+	.vfront_porch = { 3, 8, 14 },
+	.vback_porch = { 3, 8, 14 },
+	.vsync_len = { 4, 7, 12 },
 	.flags = DISPLAY_FLAGS_DE_HIGH,
 };
 
@@ -2275,6 +2276,7 @@ static const struct panel_desc innolux_g101ice_l01 = {
 		.disable = 200,
 	},
 	.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG,
+	.bus_flags = DRM_BUS_FLAG_DE_HIGH,
 	.connector_type = DRM_MODE_CONNECTOR_LVDS,
 };
 
@@ -3674,6 +3676,7 @@ static const struct panel_desc tianma_tm070jdhg30 = {
 	},
 	.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG,
 	.connector_type = DRM_MODE_CONNECTOR_LVDS,
+	.bus_flags = DRM_BUS_FLAG_DE_HIGH,
 };
 
 static const struct panel_desc tianma_tm070jvhg33 = {
@@ -3686,6 +3689,7 @@ static const struct panel_desc tianma_tm070jvhg33 = {
 	},
 	.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG,
 	.connector_type = DRM_MODE_CONNECTOR_LVDS,
+	.bus_flags = DRM_BUS_FLAG_DE_HIGH,
 };
 
 static const struct display_timing tianma_tm070rvhg71_timing = {
@@ -4659,6 +4663,9 @@ static const struct panel_desc_dsi osd101t2045_53ts = {
 	.lanes = 4,
 };
 
+// for panels using generic panel-dsi binding
+static struct panel_desc_dsi panel_dsi;
+
 static const struct of_device_id dsi_of_match[] = {
 	{
 		.compatible = "auo,b080uan01",
@@ -4682,14 +4689,118 @@ static const struct of_device_id dsi_of_match[] = {
 		.compatible = "osddisplays,osd101t2045-53ts",
 		.data = &osd101t2045_53ts
 	}, {
+		/* Must be the last entry */
+		.compatible = "panel-dsi",
+		.data = &panel_dsi,
+	}, {
 		/* sentinel */
 	}
 };
 MODULE_DEVICE_TABLE(of, dsi_of_match);
 
+
+/* Checks for DSI panel definition in device-tree, analog to panel_dpi */
+static int panel_dsi_dt_probe(struct device *dev,
+			  struct panel_desc_dsi *desc_dsi)
+{
+	struct panel_desc *desc;
+	struct display_timing *timing;
+	const struct device_node *np;
+	const char *dsi_color_format;
+	const char *dsi_mode_flags;
+	struct property *prop;
+	int dsi_lanes, ret;
+
+	np = dev->of_node;
+
+	desc = devm_kzalloc(dev, sizeof(*desc), GFP_KERNEL);
+	if (!desc)
+		return -ENOMEM;
+
+	timing = devm_kzalloc(dev, sizeof(*timing), GFP_KERNEL);
+	if (!timing)
+		return -ENOMEM;
+
+	ret = of_get_display_timing(np, "panel-timing", timing);
+	if (ret < 0) {
+		dev_err(dev, "%pOF: no panel-timing node found for \"panel-dsi\" binding\n",
+			np);
+		return ret;
+	}
+
+	desc->timings = timing;
+	desc->num_timings = 1;
+
+	of_property_read_u32(np, "width-mm", &desc->size.width);
+	of_property_read_u32(np, "height-mm", &desc->size.height);
+
+	dsi_lanes = drm_of_get_data_lanes_count_ep(np, 0, 0, 1, 4);
+
+	if (dsi_lanes < 0) {
+		dev_err(dev, "%pOF: no or too many data-lanes defined", np);
+		return dsi_lanes;
+	}
+
+	desc_dsi->lanes = dsi_lanes;
+
+	of_property_read_string(np, "dsi-color-format", &dsi_color_format);
+	if (!strcmp(dsi_color_format, "RGB888")) {
+		desc_dsi->format = MIPI_DSI_FMT_RGB888;
+		desc->bpc = 8;
+	} else if (!strcmp(dsi_color_format, "RGB565")) {
+		desc_dsi->format = MIPI_DSI_FMT_RGB565;
+		desc->bpc = 6;
+	} else if (!strcmp(dsi_color_format, "RGB666")) {
+		desc_dsi->format = MIPI_DSI_FMT_RGB666;
+		desc->bpc = 6;
+	} else if (!strcmp(dsi_color_format, "RGB666_PACKED")) {
+		desc_dsi->format = MIPI_DSI_FMT_RGB666_PACKED;
+		desc->bpc = 6;
+	} else {
+		dev_err(dev, "%pOF: no valid dsi-color-format defined", np);
+		return -EINVAL;
+	}
+
+
+	of_property_for_each_string(np, "mode", prop, dsi_mode_flags) {
+		if (!strcmp(dsi_mode_flags, "MODE_VIDEO"))
+			desc_dsi->flags |= MIPI_DSI_MODE_VIDEO;
+		else if (!strcmp(dsi_mode_flags, "MODE_VIDEO_BURST"))
+			desc_dsi->flags |= MIPI_DSI_MODE_VIDEO_BURST;
+		else if (!strcmp(dsi_mode_flags, "MODE_VIDEO_SYNC_PULSE"))
+			desc_dsi->flags |= MIPI_DSI_MODE_VIDEO_SYNC_PULSE;
+		else if (!strcmp(dsi_mode_flags, "MODE_VIDEO_AUTO_VERT"))
+			desc_dsi->flags |= MIPI_DSI_MODE_VIDEO_AUTO_VERT;
+		else if (!strcmp(dsi_mode_flags, "MODE_VIDEO_HSE"))
+			desc_dsi->flags |= MIPI_DSI_MODE_VIDEO_HSE;
+		else if (!strcmp(dsi_mode_flags, "MODE_VIDEO_NO_HFP"))
+			desc_dsi->flags |= MIPI_DSI_MODE_VIDEO_NO_HFP;
+		else if (!strcmp(dsi_mode_flags, "MODE_VIDEO_NO_HBP"))
+			desc_dsi->flags |= MIPI_DSI_MODE_VIDEO_NO_HBP;
+		else if (!strcmp(dsi_mode_flags, "MODE_VIDEO_NO_HSA"))
+			desc_dsi->flags |= MIPI_DSI_MODE_VIDEO_NO_HSA;
+		else if (!strcmp(dsi_mode_flags, "MODE_VSYNC_FLUSH"))
+			desc_dsi->flags |= MIPI_DSI_MODE_VSYNC_FLUSH;
+		else if (!strcmp(dsi_mode_flags, "MODE_NO_EOT_PACKET"))
+			desc_dsi->flags |= MIPI_DSI_MODE_NO_EOT_PACKET;
+		else if (!strcmp(dsi_mode_flags, "CLOCK_NON_CONTINUOUS"))
+			desc_dsi->flags |= MIPI_DSI_CLOCK_NON_CONTINUOUS;
+		else if (!strcmp(dsi_mode_flags, "MODE_LPM"))
+			desc_dsi->flags |= MIPI_DSI_MODE_LPM;
+		else if (!strcmp(dsi_mode_flags, "HS_PKT_END_ALIGNED"))
+			desc_dsi->flags |= MIPI_DSI_HS_PKT_END_ALIGNED;
+	}
+
+	desc->connector_type = DRM_MODE_CONNECTOR_DSI;
+	desc_dsi->desc = *desc;
+
+	return 0;
+}
+
 static int panel_simple_dsi_probe(struct mipi_dsi_device *dsi)
 {
 	const struct panel_desc_dsi *desc;
+	struct panel_desc_dsi *dt_desc;
 	const struct of_device_id *id;
 	int err;
 
@@ -4697,7 +4808,20 @@ static int panel_simple_dsi_probe(struct mipi_dsi_device *dsi)
 	if (!id)
 		return -ENODEV;
 
-	desc = id->data;
+	if (id->data == &panel_dsi) {
+		/* Handle the generic panel-dsi binding */
+		dt_desc = devm_kzalloc(&dsi->dev, sizeof(*dt_desc), GFP_KERNEL);
+		if (!dt_desc)
+			return -ENOMEM;
+
+		err = panel_dsi_dt_probe(&dsi->dev, dt_desc);
+		if (err < 0)
+			return err;
+
+		desc = dt_desc;
+	} else {
+		desc = id->data;
+	}
 
 	err = panel_simple_probe(&dsi->dev, &desc->desc);
 	if (err < 0)

@@ -157,6 +157,12 @@
 	dummy: dummy {
 		// A target for unwanted overlay fragments
 	};
+
+
+	// A few extra labels to keep overlays happy
+
+	i2c0if: i2c0if {};
+	i2c0mux: i2c0mux {};
 };
 
 rp1_target: &pcie2 {
@@ -242,11 +248,6 @@ aux: &dummy {};
 };
 
 #include "bcm2712-rpi.dtsi"
-
-// A few extra labels to keep overlays happy
-
-i2c0if: &rp1_gpio {};
-i2c0mux: &rp1_gpio {};
 
 i2c_csi_dsi0: &i2c6 { // Note: This is for MIPI0 connector only
 	pinctrl-0 = <&rp1_i2c6_38_39>;
@@ -427,7 +428,7 @@ dpi_16bit_gpio2:        &rp1_dpi_16bit_gpio2        { };
 
 / {
 	chosen: chosen {
-		bootargs = "coherent_pool=1M 8250.nr_uarts=1 pci=pcie_bus_safe snd_bcm2835.enable_compat_alsa=0 snd_bcm2835.enable_hdmi=1";
+		bootargs = "reboot=w coherent_pool=1M 8250.nr_uarts=1 pci=pcie_bus_safe snd_bcm2835.enable_compat_alsa=0 snd_bcm2835.enable_hdmi=1";
 		stdout-path = "serial10:115200n8";
 	};
 
@@ -818,6 +819,7 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 		pciex1_tperst_clk_ms = <&pciex1>, "brcm,tperst-clk-ms:0";
 		pcie_tperst_clk_ms = <&pciex1>, "brcm,tperst-clk-ms:0";
 		random = <&random>, "status";
+		rtc = <&rpi_rtc>, "status";
 		rtc_bbat_vchg = <&rpi_rtc>, "trickle-charge-microvolt:0";
 		spi = <&spi0>, "status";
 		suspend = <&pwr_key>, "linux,code:0=205";
@@ -828,6 +830,8 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 		act_led_trigger = <&act_led>, "linux,default-trigger";
 		pwr_led_activelow = <&pwr_led>, "gpios:8";
 		pwr_led_trigger = <&pwr_led>, "linux,default-trigger";
+		eth_led0 = <&phy1>,"led-modes:0";
+		eth_led1 = <&phy1>,"led-modes:4";
 		drm_fb0_rp1_dsi0 = <&aliases>, "drm-fb0=",&dsi0;
 		drm_fb0_rp1_dsi1 = <&aliases>, "drm-fb0=",&dsi1;
 		drm_fb0_rp1_dpi = <&aliases>, "drm-fb0=",&dpi;
@@ -840,5 +844,18 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 		drm_fb2_rp1_dsi1 = <&aliases>, "drm-fb2=",&dsi1;
 		drm_fb2_rp1_dpi = <&aliases>, "drm-fb2=",&dpi;
 		drm_fb2_vc4 = <&aliases>, "drm-fb2=",&vc4;
+
+		fan_temp0 = <&cpu_tepid>,"temperature:0";
+		fan_temp1 = <&cpu_warm>,"temperature:0";
+		fan_temp2 = <&cpu_hot>,"temperature:0";
+		fan_temp3 = <&cpu_vhot>,"temperature:0";
+		fan_temp0_hyst = <&cpu_tepid>,"hysteresis:0";
+		fan_temp1_hyst = <&cpu_warm>,"hysteresis:0";
+		fan_temp2_hyst = <&cpu_hot>,"hysteresis:0";
+		fan_temp3_hyst = <&cpu_vhot>,"hysteresis:0";
+		fan_temp0_speed = <&fan>, "cooling-levels:4";
+		fan_temp1_speed = <&fan>, "cooling-levels:8";
+		fan_temp2_speed = <&fan>, "cooling-levels:12";
+		fan_temp3_speed = <&fan>, "cooling-levels:16";
 	};
 };

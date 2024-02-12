@@ -347,6 +347,36 @@ static int vc5_hvs_debugfs_gamma(struct seq_file *m, void *data)
 	return 0;
 }
 
+static int vc4_hvs_debugfs_dlist_allocs(struct seq_file *m, void *data)
+{
+	struct drm_info_node *node = m->private;
+	struct drm_device *dev = node->minor->dev;
+	struct vc4_dev *vc4 = to_vc4_dev(dev);
+	struct vc4_hvs *hvs = vc4->hvs;
+	struct drm_printer p = drm_seq_file_printer(m);
+	struct vc4_hvs_dlist_allocation *cur, *next;
+	struct drm_mm_node *mm_node;
+	unsigned long flags;
+
+	spin_lock_irqsave(&hvs->mm_lock, flags);
+
+	drm_printf(&p, "Allocated nodes:\n");
+	list_for_each_entry(mm_node, drm_mm_nodes(&hvs->dlist_mm), node_list) {
+		drm_printf(&p, "node [%08llx + %08llx]\n", mm_node->start, mm_node->size);
+	}
+
+	drm_printf(&p, "Stale nodes:\n");
+	list_for_each_entry_safe(cur, next, &hvs->stale_dlist_entries, node) {
+		drm_printf(&p, "node [%08llx + %08llx] channel %u frcnt %u\n",
+			   cur->mm_node.start, cur->mm_node.size, cur->channel,
+			   cur->target_frame_count);
+	}
+
+	spin_unlock_irqrestore(&hvs->mm_lock, flags);
+
+	return 0;
+}
+
 /* The filter kernel is composed of dwords each containing 3 9-bit
  * signed integers packed next to each other.
  */
@@ -604,6 +634,9 @@ static void vc4_hvs_irq_clear_eof(struct vc4_hvs *hvs,
 	hvs->eof_irq[channel].enabled = false;
 }
 
+static void vc4_hvs_free_dlist_entry_locked(struct vc4_hvs *hvs,
+					    struct vc4_hvs_dlist_allocation *alloc);
+
 static struct vc4_hvs_dlist_allocation *
 vc4_hvs_alloc_dlist_entry(struct vc4_hvs *hvs,
 			  unsigned int channel,
@@ -612,6 +645,7 @@ vc4_hvs_alloc_dlist_entry(struct vc4_hvs *hvs,
 	struct vc4_dev *vc4 = hvs->vc4;
 	struct drm_device *dev = &vc4->base;
 	struct vc4_hvs_dlist_allocation *alloc;
+	struct vc4_hvs_dlist_allocation *cur, *next;
 	unsigned long flags;
 	int ret;
 
@@ -629,8 +663,26 @@ vc4_hvs_alloc_dlist_entry(struct vc4_hvs *hvs,
 				 dlist_count);
 	spin_unlock_irqrestore(&hvs->mm_lock, flags);
 	if (ret) {
-		drm_err(dev, "Failed to allocate DLIST entry: %d\n", ret);
-		return ERR_PTR(ret);
+		drm_err(dev, "Failed to allocate DLIST entry. Requested size=%zu. ret=%d. DISPCTRL is %08x\n",
+			dlist_count, ret, HVS_READ(SCALER_DISPCTRL));
+
+		/* This should never happen as stale entries should get released
+		 * as the frame counter interrupt triggers.
+		 * However we've seen this fail for reasons currently unknown.
+		 * Free all stale entries now so we should be able to complete
+		 * this allocation.
+		 */
+		spin_lock_irqsave(&hvs->mm_lock, flags);
+		list_for_each_entry_safe(cur, next, &hvs->stale_dlist_entries, node) {
+			vc4_hvs_free_dlist_entry_locked(hvs, cur);
+		}
+
+		ret = drm_mm_insert_node(&hvs->dlist_mm, &alloc->mm_node,
+					 dlist_count);
+		spin_unlock_irqrestore(&hvs->mm_lock, flags);
+
+		if (ret)
+			return ERR_PTR(ret);
 	}
 
 	alloc->channel = channel;
@@ -666,8 +718,11 @@ void vc4_hvs_mark_dlist_entry_stale(struct vc4_hvs *hvs,
 	 * Kunit tests run with a mock device and we consider any hardware
 	 * access a test failure. Let's free the dlist allocation right away if
 	 * we're running under kunit, we won't risk a dlist corruption anyway.
+	 *
+	 * Likewise if the allocation was only checked and never programmed, we
+	 * can destroy the allocation immediately.
 	 */
-	if (kunit_get_current_test()) {
+	if (kunit_get_current_test() || !alloc->dlist_programmed) {
 		spin_lock_irqsave(&hvs->mm_lock, flags);
 		vc4_hvs_free_dlist_entry_locked(hvs, alloc);
 		spin_unlock_irqrestore(&hvs->mm_lock, flags);
@@ -697,7 +752,8 @@ static void vc4_hvs_schedule_dlist_sweep(struct vc4_hvs *hvs,
 	if (!list_empty(&hvs->stale_dlist_entries))
 		queue_work(system_unbound_wq, &hvs->free_dlist_work);
 
-	vc4_hvs_irq_clear_eof(hvs, channel);
+	if (list_empty(&hvs->stale_dlist_entries))
+		vc4_hvs_irq_clear_eof(hvs, channel);
 
 	spin_unlock_irqrestore(&hvs->mm_lock, flags);
 }
@@ -710,6 +766,27 @@ static void vc4_hvs_schedule_dlist_sweep(struct vc4_hvs *hvs,
 static bool vc4_hvs_frcnt_lte(u8 cnt1, u8 cnt2)
 {
 	return (s8)((cnt1 << 2) - (cnt2 << 2)) <= 0;
+}
+
+bool vc4_hvs_check_channel_active(struct vc4_hvs *hvs, unsigned int fifo)
+{
+	struct vc4_dev *vc4 = hvs->vc4;
+	struct drm_device *drm = &vc4->base;
+	bool enabled = false;
+	int idx;
+
+	WARN_ON_ONCE(vc4->gen > VC4_GEN_6);
+
+	if (!drm_dev_enter(drm, &idx))
+		return 0;
+
+	if (vc4->gen >= VC4_GEN_6)
+		enabled = HVS_READ(SCALER6_DISPX_CTRL0(fifo)) & SCALER6_DISPX_CTRL0_ENB;
+	else
+		enabled = HVS_READ(SCALER_DISPCTRLX(fifo)) & SCALER_DISPCTRLX_ENABLE;
+
+	drm_dev_exit(idx);
+	return enabled;
 }
 
 /*
@@ -740,13 +817,19 @@ static void vc4_hvs_dlist_free_work(struct work_struct *work)
 	struct vc4_hvs *hvs = container_of(work, struct vc4_hvs, free_dlist_work);
 	struct vc4_hvs_dlist_allocation *cur, *next;
 	unsigned long flags;
+	bool active[3];
+	u8 frcnt[3];
+	int i;
+
 
 	spin_lock_irqsave(&hvs->mm_lock, flags);
+	for (i = 0; i < 3; i++) {
+		frcnt[i] = vc4_hvs_get_fifo_frame_count(hvs, i);
+		active[i] = vc4_hvs_check_channel_active(hvs, i);
+	}
 	list_for_each_entry_safe(cur, next, &hvs->stale_dlist_entries, node) {
-		u8 frcnt;
-
-		frcnt = vc4_hvs_get_fifo_frame_count(hvs, cur->channel);
-		if (!vc4_hvs_frcnt_lte(cur->target_frame_count, frcnt))
+		if (active[cur->channel] &&
+		    !vc4_hvs_frcnt_lte(cur->target_frame_count, frcnt[cur->channel]))
 			continue;
 
 		vc4_hvs_free_dlist_entry_locked(hvs, cur);
@@ -766,10 +849,28 @@ u8 vc4_hvs_get_fifo_frame_count(struct vc4_hvs *hvs, unsigned int fifo)
 	if (!drm_dev_enter(drm, &idx))
 		return 0;
 
-	if (vc4->gen >= VC4_GEN_6) {
+	switch (vc4->gen) {
+	case VC4_GEN_6:
 		field = VC4_GET_FIELD(HVS_READ(SCALER6_DISPX_STATUS(fifo)),
 				      SCALER6_DISPX_STATUS_FRCNT);
-	} else {
+		break;
+	case VC4_GEN_5:
+		switch (fifo) {
+		case 0:
+			field = VC4_GET_FIELD(HVS_READ(SCALER_DISPSTAT1),
+					      SCALER5_DISPSTAT1_FRCNT0);
+			break;
+		case 1:
+			field = VC4_GET_FIELD(HVS_READ(SCALER_DISPSTAT1),
+					      SCALER5_DISPSTAT1_FRCNT1);
+			break;
+		case 2:
+			field = VC4_GET_FIELD(HVS_READ(SCALER_DISPSTAT2),
+					      SCALER5_DISPSTAT2_FRCNT2);
+			break;
+		}
+		break;
+	case VC4_GEN_4:
 		switch (fifo) {
 		case 0:
 			field = VC4_GET_FIELD(HVS_READ(SCALER_DISPSTAT1),
@@ -784,6 +885,7 @@ u8 vc4_hvs_get_fifo_frame_count(struct vc4_hvs *hvs, unsigned int fifo)
 					      SCALER_DISPSTAT2_FRCNT2);
 			break;
 		}
+		break;
 	}
 
 	drm_dev_exit(idx);
@@ -992,13 +1094,11 @@ static void __vc4_hvs_stop_channel(struct vc4_hvs *hvs, unsigned int chan)
 	if (!drm_dev_enter(drm, &idx))
 		return;
 
-	if (HVS_READ(SCALER_DISPCTRLX(chan)) & SCALER_DISPCTRLX_ENABLE)
+	if (!(HVS_READ(SCALER_DISPCTRLX(chan)) & SCALER_DISPCTRLX_ENABLE))
 		goto out;
 
-	HVS_WRITE(SCALER_DISPCTRLX(chan),
-		  HVS_READ(SCALER_DISPCTRLX(chan)) | SCALER_DISPCTRLX_RESET);
-	HVS_WRITE(SCALER_DISPCTRLX(chan),
-		  HVS_READ(SCALER_DISPCTRLX(chan)) & ~SCALER_DISPCTRLX_ENABLE);
+	HVS_WRITE(SCALER_DISPCTRLX(chan), SCALER_DISPCTRLX_RESET);
+	HVS_WRITE(SCALER_DISPCTRLX(chan), 0);
 
 	/* Once we leave, the scaler should be disabled and its fifo empty. */
 	WARN_ON_ONCE(HVS_READ(SCALER_DISPCTRLX(chan)) & SCALER_DISPCTRLX_RESET);
@@ -1006,10 +1106,6 @@ static void __vc4_hvs_stop_channel(struct vc4_hvs *hvs, unsigned int chan)
 	WARN_ON_ONCE(VC4_GET_FIELD(HVS_READ(SCALER_DISPSTATX(chan)),
 				   SCALER_DISPSTATX_MODE) !=
 		     SCALER_DISPSTATX_MODE_DISABLED);
-
-	WARN_ON_ONCE((HVS_READ(SCALER_DISPSTATX(chan)) &
-		      (SCALER_DISPSTATX_FULL | SCALER_DISPSTATX_EMPTY)) !=
-		     SCALER_DISPSTATX_EMPTY);
 
 out:
 	drm_dev_exit(idx);
@@ -1026,7 +1122,7 @@ static void __vc6_hvs_stop_channel(struct vc4_hvs *hvs, unsigned int chan)
 	if (!drm_dev_enter(drm, &idx))
 		return;
 
-	if (HVS_READ(SCALER6_DISPX_CTRL0(chan)) & SCALER6_DISPX_CTRL0_ENB)
+	if (!(HVS_READ(SCALER6_DISPX_CTRL0(chan)) & SCALER6_DISPX_CTRL0_ENB))
 		goto out;
 
 	HVS_WRITE(SCALER6_DISPX_CTRL0(chan),
@@ -1153,6 +1249,7 @@ static void vc4_hvs_install_dlist(struct drm_crtc *crtc)
 		return;
 
 	WARN_ON(!vc4_state->mm);
+	vc4_state->mm->dlist_programmed = true;
 
 	if (vc4->gen >= VC4_GEN_6)
 		HVS_WRITE(SCALER6_DISPX_LPTRS(vc4_state->assigned_channel),
@@ -1582,6 +1679,11 @@ int vc4_hvs_debugfs_init(struct drm_minor *minor)
 
 	ret = vc4_debugfs_add_file(minor, "hvs_underrun",
 				   vc4_hvs_debugfs_underrun, NULL);
+	if (ret)
+		return ret;
+
+	ret = vc4_debugfs_add_file(minor, "hvs_dlist_allocs",
+				   vc4_hvs_debugfs_dlist_allocs, NULL);
 	if (ret)
 		return ret;
 

@@ -564,6 +564,7 @@ struct vc4_crtc_data {
 struct vc4_txp_data {
 	struct vc4_crtc_data	base;
 	enum vc4_encoder_type encoder_type;
+	unsigned int high_addr_ptr_reg;
 	unsigned int has_byte_enable:1;
 	unsigned int size_minus_one:1;
 	unsigned int supports_40bit_addresses:1;
@@ -696,6 +697,7 @@ struct vc4_hvs_dlist_allocation {
 	struct drm_mm_node mm_node;
 	unsigned int channel;
 	u8 target_frame_count;
+	bool dlist_programmed;
 };
 
 struct vc4_crtc_state {

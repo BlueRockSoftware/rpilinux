@@ -164,6 +164,10 @@ struct imx477_mode {
 	struct imx477_reg_list reg_list;
 };
 
+static const s64 imx477_link_freq_menu[] = {
+	IMX477_DEFAULT_LINK_FREQ,
+};
+
 static const struct imx477_reg mode_common_regs[] = {
 	{0x0136, 0x18},
 	{0x0137, 0x00},
@@ -1110,6 +1114,7 @@ struct imx477 {
 	struct v4l2_ctrl_handler ctrl_handler;
 	/* V4L2 Controls */
 	struct v4l2_ctrl *pixel_rate;
+	struct v4l2_ctrl *link_freq;
 	struct v4l2_ctrl *exposure;
 	struct v4l2_ctrl *vflip;
 	struct v4l2_ctrl *hflip;
@@ -1737,25 +1742,20 @@ static int imx477_start_streaming(struct imx477 *imx477)
 	imx477_write_reg(imx477, 0x0b05, IMX477_REG_VALUE_08BIT, !!dpc_enable);
 	imx477_write_reg(imx477, 0x0b06, IMX477_REG_VALUE_08BIT, !!dpc_enable);
 
-	/* Set vsync trigger mode */
-	if (trigger_mode != 0) {
-		/* trigger_mode == 1 for source, 2 for sink */
-		const u32 val = (trigger_mode == 1) ? 1 : 0;
-
-		imx477_write_reg(imx477, IMX477_REG_MC_MODE,
-				 IMX477_REG_VALUE_08BIT, 1);
-		imx477_write_reg(imx477, IMX477_REG_MS_SEL,
-				 IMX477_REG_VALUE_08BIT, val);
-		imx477_write_reg(imx477, IMX477_REG_XVS_IO_CTRL,
-				 IMX477_REG_VALUE_08BIT, val);
-		imx477_write_reg(imx477, IMX477_REG_EXTOUT_EN,
-				 IMX477_REG_VALUE_08BIT, val);
-	}
-
 	/* Apply customized values from user */
 	ret =  __v4l2_ctrl_handler_setup(imx477->sd.ctrl_handler);
 	if (ret)
 		return ret;
+
+	/* Set vsync trigger mode: 0=standalone, 1=source, 2=sink */
+	imx477_write_reg(imx477, IMX477_REG_MC_MODE,
+			 IMX477_REG_VALUE_08BIT, (trigger_mode > 0) ? 1 : 0);
+	imx477_write_reg(imx477, IMX477_REG_MS_SEL,
+			 IMX477_REG_VALUE_08BIT, (trigger_mode <= 1) ? 1 : 0);
+	imx477_write_reg(imx477, IMX477_REG_XVS_IO_CTRL,
+			 IMX477_REG_VALUE_08BIT, (trigger_mode == 1) ? 1 : 0);
+	imx477_write_reg(imx477, IMX477_REG_EXTOUT_EN,
+			 IMX477_REG_VALUE_08BIT, (trigger_mode == 1) ? 1 : 0);
 
 	/* set stream on register */
 	return imx477_write_reg(imx477, IMX477_REG_MODE_SELECT,
@@ -1773,6 +1773,10 @@ static void imx477_stop_streaming(struct imx477 *imx477)
 			       IMX477_REG_VALUE_08BIT, IMX477_MODE_STANDBY);
 	if (ret)
 		dev_err(&client->dev, "%s failed to set stream\n", __func__);
+
+	/* Stop driving XVS out (there is still a weak pull-up) */
+	imx477_write_reg(imx477, IMX477_REG_EXTOUT_EN,
+			 IMX477_REG_VALUE_08BIT, 0);
 }
 
 static int imx477_set_stream(struct v4l2_subdev *sd, int enable)
@@ -1996,6 +2000,17 @@ static int imx477_init_controls(struct imx477 *imx477)
 					       IMX477_PIXEL_RATE,
 					       IMX477_PIXEL_RATE, 1,
 					       IMX477_PIXEL_RATE);
+	if (imx477->pixel_rate)
+		imx477->pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+	/* LINK_FREQ is also read only */
+	imx477->link_freq =
+		v4l2_ctrl_new_int_menu(ctrl_hdlr, &imx477_ctrl_ops,
+				       V4L2_CID_LINK_FREQ,
+				       ARRAY_SIZE(imx477_link_freq_menu) - 1, 0,
+				       imx477_link_freq_menu);
+	if (imx477->link_freq)
+		imx477->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 	/*
 	 * Create the controls here, but mode specific limits are setup

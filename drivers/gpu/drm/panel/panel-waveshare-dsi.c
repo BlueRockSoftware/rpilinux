@@ -131,7 +131,7 @@ static const struct drm_display_mode ws_panel_11_9_mode = {
 	.hdisplay = 320,
 	.hsync_start = 320 + 60,
 	.hsync_end = 320 + 60 + 60,
-	.htotal = 320 + 60 + 60 + 120,
+	.htotal = 320 + 60 + 60 + 60,
 	.vdisplay = 1480,
 	.vsync_start = 1480 + 60,
 	.vsync_end = 1480 + 60 + 60,
@@ -340,9 +340,8 @@ static int ws_panel_probe(struct i2c_client *i2c,
 	 */
 	drm_panel_add(&ts->base);
 
-	ts->dsi->mode_flags = (MIPI_DSI_MODE_VIDEO |
-			   MIPI_DSI_MODE_VIDEO_SYNC_PULSE |
-			   MIPI_DSI_MODE_LPM);
+	ts->dsi->mode_flags =  MIPI_DSI_MODE_VIDEO_HSE | MIPI_DSI_MODE_VIDEO |
+			   MIPI_DSI_CLOCK_NON_CONTINUOUS;
 	ts->dsi->format = MIPI_DSI_FMT_RGB888;
 	ts->dsi->lanes = 2;
 
@@ -362,7 +361,16 @@ static void ws_panel_remove(struct i2c_client *i2c)
 {
 	struct ws_panel *ts = i2c_get_clientdata(i2c);
 
+	ws_panel_disable(&ts->base);
+
 	drm_panel_remove(&ts->base);
+}
+
+static void ws_panel_shutdown(struct i2c_client *i2c)
+{
+	struct ws_panel *ts = i2c_get_clientdata(i2c);
+
+	ws_panel_disable(&ts->base);
 }
 
 static const struct of_device_id ws_panel_of_ids[] = {
@@ -403,6 +411,7 @@ static struct i2c_driver ws_panel_driver = {
 	},
 	.probe = ws_panel_probe,
 	.remove = ws_panel_remove,
+	.shutdown = ws_panel_shutdown,
 };
 module_i2c_driver(ws_panel_driver);
 

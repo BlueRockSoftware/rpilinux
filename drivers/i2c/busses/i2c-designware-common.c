@@ -63,7 +63,7 @@ static int dw_reg_read(void *context, unsigned int reg, unsigned int *val)
 {
 	struct dw_i2c_dev *dev = context;
 
-	*val = readl_relaxed(dev->base + reg);
+	*val = readl(dev->base + reg);
 
 	return 0;
 }
@@ -72,7 +72,7 @@ static int dw_reg_write(void *context, unsigned int reg, unsigned int val)
 {
 	struct dw_i2c_dev *dev = context;
 
-	writel_relaxed(val, dev->base + reg);
+	writel(val, dev->base + reg);
 
 	return 0;
 }
@@ -81,7 +81,7 @@ static int dw_reg_read_swab(void *context, unsigned int reg, unsigned int *val)
 {
 	struct dw_i2c_dev *dev = context;
 
-	*val = swab32(readl_relaxed(dev->base + reg));
+	*val = swab32(readl(dev->base + reg));
 
 	return 0;
 }
@@ -90,7 +90,7 @@ static int dw_reg_write_swab(void *context, unsigned int reg, unsigned int val)
 {
 	struct dw_i2c_dev *dev = context;
 
-	writel_relaxed(swab32(val), dev->base + reg);
+	writel(swab32(val), dev->base + reg);
 
 	return 0;
 }
@@ -99,8 +99,8 @@ static int dw_reg_read_word(void *context, unsigned int reg, unsigned int *val)
 {
 	struct dw_i2c_dev *dev = context;
 
-	*val = readw_relaxed(dev->base + reg) |
-		(readw_relaxed(dev->base + reg + 2) << 16);
+	*val = readw(dev->base + reg) |
+		(readw(dev->base + reg + 2) << 16);
 
 	return 0;
 }
@@ -109,8 +109,8 @@ static int dw_reg_write_word(void *context, unsigned int reg, unsigned int val)
 {
 	struct dw_i2c_dev *dev = context;
 
-	writew_relaxed(val, dev->base + reg);
-	writew_relaxed(val >> 16, dev->base + reg + 2);
+	writew(val, dev->base + reg);
+	writew(val >> 16, dev->base + reg + 2);
 
 	return 0;
 }
@@ -318,6 +318,9 @@ void i2c_dw_adjust_bus_speed(struct dw_i2c_dev *dev)
 {
 	u32 acpi_speed = i2c_dw_acpi_round_bus_speed(dev->dev);
 	struct i2c_timings *t = &dev->timings;
+	u32 wanted_speed;
+	u32 legal_speed = 0;
+	int i;
 
 	/*
 	 * Find bus speed from the "clock-frequency" device property, ACPI
@@ -329,6 +332,30 @@ void i2c_dw_adjust_bus_speed(struct dw_i2c_dev *dev)
 		t->bus_freq_hz = max(t->bus_freq_hz, acpi_speed);
 	else
 		t->bus_freq_hz = I2C_MAX_FAST_MODE_FREQ;
+
+	wanted_speed = t->bus_freq_hz;
+
+	/* For unsupported speeds, scale down the lowest speed which is faster. */
+	for (i = 0; i < ARRAY_SIZE(supported_speeds); i++) {
+		/* supported speeds is in decreasing order */
+		if (wanted_speed == supported_speeds[i]) {
+			legal_speed = 0;
+			break;
+		}
+		if (wanted_speed > supported_speeds[i])
+			break;
+
+		legal_speed = supported_speeds[i];
+	}
+
+	if (legal_speed) {
+		/*
+		 * Pretend this was the requested speed, but preserve the preferred
+		 * speed so the clock counts can be scaled.
+		 */
+		t->bus_freq_hz = legal_speed;
+		dev->wanted_bus_speed = wanted_speed;
+	}
 }
 EXPORT_SYMBOL_GPL(i2c_dw_adjust_bus_speed);
 

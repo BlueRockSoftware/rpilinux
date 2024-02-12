@@ -48,16 +48,6 @@
 		bcm2712;
 	};
 
-	dwc2 {
-		bcm2835;
-		bcm2711;
-		bcm2712 = "dwc2-pi5";
-	};
-
-	dwc2-pi5 {
-		bcm2712;
-	};
-
 	highperi {
 		bcm2711;
 	};
@@ -195,6 +185,11 @@
 
 	pcie-32bit-dma {
 		bcm2711;
+		bcm2712 = "pcie-32bit-dma-pi5";
+	};
+
+	pcie-32bit-dma-pi5 {
+		bcm2712;
 	};
 
 	pi3-act-led {
@@ -211,6 +206,16 @@
 
 	pi3-miniuart-bt {
 		renamed = "miniuart-bt";
+	};
+
+	pisound {
+		bcm2835;
+		bcm2711;
+		bcm2712 = "pisound-pi5";
+	};
+
+	pisound-pi5 {
+		bcm2712;
 	};
 
 	pwm1 {
@@ -258,6 +263,10 @@
 
 	sdio-1bit {
 		deprecated = "use sdio,bus_width=1,gpios_22_25";
+	};
+
+	sdio-pi5 {
+		bcm2712;
 	};
 
 	sdtweak {

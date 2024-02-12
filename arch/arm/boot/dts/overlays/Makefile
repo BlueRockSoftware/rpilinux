@@ -59,7 +59,6 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	draws.dtbo \
 	dwc-otg.dtbo \
 	dwc2.dtbo \
-	dwc2-pi5.dtbo \
 	edt-ft5406.dtbo \
 	enc28j60.dtbo \
 	enc28j60-spi2.dtbo \
@@ -87,6 +86,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	hifiberry-amp.dtbo \
 	hifiberry-amp100.dtbo \
 	hifiberry-amp3.dtbo \
+	hifiberry-amp4pro.dtbo \
 	hifiberry-dac.dtbo \
 	hifiberry-dacplus.dtbo \
 	hifiberry-dacplusadc.dtbo \
@@ -174,16 +174,17 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	mipi-dbi-spi.dtbo \
 	mlx90640.dtbo \
 	mmc.dtbo \
-	mpu6050.dtbo \
 	mz61581.dtbo \
 	ov2311.dtbo \
 	ov5647.dtbo \
+	ov64a40.dtbo \
 	ov7251.dtbo \
 	ov9281.dtbo \
 	papirus.dtbo \
 	pca953x.dtbo \
 	pcf857x.dtbo \
 	pcie-32bit-dma.dtbo \
+	pcie-32bit-dma-pi5.dtbo \
 	pibell.dtbo \
 	pifacedigital.dtbo \
 	pifi-40.dtbo \
@@ -194,6 +195,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	piscreen.dtbo \
 	piscreen2r.dtbo \
 	pisound.dtbo \
+	pisound-pi5.dtbo \
 	pitft22.dtbo \
 	pitft28-capacitive.dtbo \
 	pitft28-resistive.dtbo \
@@ -228,6 +230,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	sc16is752-spi1.dtbo \
 	sdhost.dtbo \
 	sdio.dtbo \
+	sdio-pi5.dtbo \
 	seeed-can-fd-hat-v1.dtbo \
 	seeed-can-fd-hat-v2.dtbo \
 	sh1106-spi.dtbo \
@@ -295,6 +298,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	vc4-kms-dpi-hyperpixel4sq.dtbo \
 	vc4-kms-dpi-panel.dtbo \
 	vc4-kms-dsi-7inch.dtbo \
+	vc4-kms-dsi-generic.dtbo \
 	vc4-kms-dsi-lt070me05000.dtbo \
 	vc4-kms-dsi-lt070me05000-v2.dtbo \
 	vc4-kms-dsi-waveshare-panel.dtbo \

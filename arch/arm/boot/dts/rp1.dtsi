@@ -187,7 +187,7 @@
 			interrupts = <RP1_INT_SPI1 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS>;
 			clock-names = "ssi_clk";
-			#address-cells = <0>;
+			#address-cells = <1>;
 			#size-cells = <0>;
 			num-cs = <2>;
 			dmas = <&rp1_dma RP1_DMA_SPI1_TX>,
@@ -263,6 +263,21 @@
 			status = "disabled";
 		};
 
+		rp1_spi6: spi@68000 {
+			reg = <0xc0 0x40068000  0x0 0x130>;
+			compatible = "snps,dw-apb-ssi";
+			interrupts = <RP1_INT_SPI6 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&rp1_clocks RP1_CLK_SYS>;
+			clock-names = "ssi_clk";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			num-cs = <2>;
+			dmas = <&rp1_dma RP1_DMA_SPI6_TX>,
+			       <&rp1_dma RP1_DMA_SPI6_RX>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
 		// SPI7 is a target/slave interface
 		rp1_spi7: spi@6c000 {
 			reg = <0xc0 0x4006c000  0x0 0x130>;
@@ -290,6 +305,9 @@
 			compatible = "snps,designware-i2c";
 			interrupts = <RP1_INT_I2C0 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS>;
+			i2c-scl-rising-time-ns = <65>;
+			i2c-scl-falling-time-ns = <100>;
+			i2c-sda-hold-time-ns = <300>;
 			status = "disabled";
 		};
 
@@ -298,6 +316,9 @@
 			compatible = "snps,designware-i2c";
 			interrupts = <RP1_INT_I2C1 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS>;
+			i2c-scl-rising-time-ns = <65>;
+			i2c-scl-falling-time-ns = <100>;
+			i2c-sda-hold-time-ns = <300>;
 			status = "disabled";
 		};
 
@@ -306,6 +327,9 @@
 			compatible = "snps,designware-i2c";
 			interrupts = <RP1_INT_I2C2 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS>;
+			i2c-scl-rising-time-ns = <65>;
+			i2c-scl-falling-time-ns = <100>;
+			i2c-sda-hold-time-ns = <300>;
 			status = "disabled";
 		};
 
@@ -314,6 +338,9 @@
 			compatible = "snps,designware-i2c";
 			interrupts = <RP1_INT_I2C3 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS>;
+			i2c-scl-rising-time-ns = <65>;
+			i2c-scl-falling-time-ns = <100>;
+			i2c-sda-hold-time-ns = <300>;
 			status = "disabled";
 		};
 
@@ -322,6 +349,9 @@
 			compatible = "snps,designware-i2c";
 			interrupts = <RP1_INT_I2C4 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS>;
+			i2c-scl-rising-time-ns = <65>;
+			i2c-scl-falling-time-ns = <100>;
+			i2c-sda-hold-time-ns = <300>;
 			status = "disabled";
 		};
 
@@ -330,6 +360,9 @@
 			compatible = "snps,designware-i2c";
 			interrupts = <RP1_INT_I2C5 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS>;
+			i2c-scl-rising-time-ns = <65>;
+			i2c-scl-falling-time-ns = <100>;
+			i2c-sda-hold-time-ns = <300>;
 			status = "disabled";
 		};
 
@@ -338,6 +371,9 @@
 			compatible = "snps,designware-i2c";
 			interrupts = <RP1_INT_I2C6 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS>;
+			i2c-scl-rising-time-ns = <65>;
+			i2c-scl-falling-time-ns = <100>;
+			i2c-sda-hold-time-ns = <300>;
 			status = "disabled";
 		};
 
@@ -621,66 +657,79 @@
 			rp1_i2c4_34_35: rp1_i2c4_34_35 {
 				function = "i2c4";
 				pins = "gpio34", "gpio35";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c6_38_39: rp1_i2c6_38_39 {
 				function = "i2c6";
 				pins = "gpio38", "gpio39";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c4_40_41: rp1_i2c4_40_41 {
 				function = "i2c4";
 				pins = "gpio40", "gpio41";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c5_44_45: rp1_i2c5_44_45 {
 				function = "i2c5";
 				pins = "gpio44", "gpio45";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c0_0_1: rp1_i2c0_0_1 {
 				function = "i2c0";
 				pins = "gpio0", "gpio1";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c0_8_9: rp1_i2c0_8_9 {
 				function = "i2c0";
 				pins = "gpio8", "gpio9";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c1_2_3: rp1_i2c1_2_3 {
 				function = "i2c1";
 				pins = "gpio2", "gpio3";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c1_10_11: rp1_i2c1_10_11 {
 				function = "i2c1";
 				pins = "gpio10", "gpio11";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c2_4_5: rp1_i2c2_4_5 {
 				function = "i2c2";
 				pins = "gpio4", "gpio5";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c2_12_13: rp1_i2c2_12_13 {
 				function = "i2c2";
 				pins = "gpio12", "gpio13";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c3_6_7: rp1_i2c3_6_7 {
 				function = "i2c3";
 				pins = "gpio6", "gpio7";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c3_14_15: rp1_i2c3_14_15 {
 				function = "i2c3";
 				pins = "gpio14", "gpio15";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 			rp1_i2c3_22_23: rp1_i2c3_22_23 {
 				function = "i2c3";
 				pins = "gpio22", "gpio23";
+				drive-strength = <12>;
 				bias-pull-up;
 			};
 
@@ -947,7 +996,7 @@
 
 		rp1_mmc0: mmc@180000 {
 			reg = <0xc0 0x40180000  0x0 0x100>;
-			compatible = "snps,dwcmshc-sdhci";
+			compatible = "raspberrypi,rp1-dwcmshc";
 			interrupts = <RP1_INT_SDIO0 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS &sdhci_core
 			          &rp1_clocks RP1_CLK_SDIO_TIMER
@@ -963,7 +1012,7 @@
 
 		rp1_mmc1: mmc@184000 {
 			reg = <0xc0 0x40184000  0x0 0x100>;
-			compatible = "snps,dwcmshc-sdhci";
+			compatible = "raspberrypi,rp1-dwcmshc";
 			interrupts = <RP1_INT_SDIO1 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&rp1_clocks RP1_CLK_SYS &sdhci_core
 			          &rp1_clocks RP1_CLK_SDIO_TIMER
@@ -1002,6 +1051,7 @@
 			usb3-lpm-capable;
 			snps,axi-pipe-limit = /bits/ 8 <8>;
 			snps,dis_rxdet_inp3_quirk;
+			snps,parkmode-disable-ss-quirk;
 			snps,tx-max-burst-prd = <8>;
 			snps,tx-thr-num-pkt-prd = <2>;
 			interrupts = <RP1_INT_USBHOST0_0 IRQ_TYPE_EDGE_RISING>;
@@ -1015,6 +1065,7 @@
 			usb3-lpm-capable;
 			snps,axi-pipe-limit = /bits/ 8 <8>;
 			snps,dis_rxdet_inp3_quirk;
+			snps,parkmode-disable-ss-quirk;
 			snps,tx-max-burst-prd = <8>;
 			snps,tx-thr-num-pkt-prd = <2>;
 			interrupts = <RP1_INT_USBHOST1_0 IRQ_TYPE_EDGE_RISING>;
