@@ -39,7 +39,6 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
-
 #include "../codecs/wm8804.h"
 
 struct wm8804_clk_cfg {
@@ -91,20 +90,22 @@ static const char * const wm8805_input_select_text[] = {
 };
 
 static const unsigned int wm8805_input_channel_select_value[] = {
-	0 , 1 , 2 , 3 , 4 , 5 , 6 , 7
+	0 ,1 ,2 ,3 ,4 ,5 ,6 ,7
 };
 
 static const struct soc_enum wm8805_input_channel_sel[] = {
-	SOC_VALUE_ENUM_SINGLE(WM8804_PLL6,0,7,ARRAY_SIZE(wm8805_input_select_text),wm8805_input_select_text,wm8805_input_channel_select_value ),
+	SOC_VALUE_ENUM_SINGLE(WM8804_PLL6, 0, 7, ARRAY_SIZE(wm8805_input_select_text),
+	wm8805_input_select_text, wm8805_input_channel_select_value),
 };
 
 static const struct snd_kcontrol_new wm8805_input_controls_card[]={
-	SOC_ENUM("Select Input Channel",wm8805_input_channel_sel[0]),
+	SOC_ENUM("Select Input Channel", wm8805_input_channel_sel[0]),
 };
 
 static int wm8805_add_input_controls(struct snd_soc_component *component)
 {
-	snd_soc_add_component_controls(component,wm8805_input_controls_card,ARRAY_SIZE(wm8805_input_controls_card));
+	snd_soc_add_component_controls(component, wm8805_input_controls_card,
+	ARRAY_SIZE(wm8805_input_controls_card));
 	pr_debug("adding new controls");
 	return 0;
 }
@@ -159,14 +160,12 @@ static int snd_rpi_wm8804_hw_params(struct snd_pcm_substream *substream,
 
 	if (samplerate == wm8804_samplerate)
 		return 0;
-
 	/* clear until all clocks are setup properly */
 	wm8804_samplerate = 0;
 	snd_rpi_wm8804_clk_cfg(samplerate, &clk_cfg);
 	pr_debug("%s samplerate: %d mclk_freq: %u mclk_div: %u sysclk: %u\n",
 			__func__, samplerate, clk_cfg.mclk_freq,
 			clk_cfg.mclk_div, clk_cfg.sysclk_freq);
-
 	switch (samplerate) {
 	case 32000:
 		sampling_freq = 0x03;
@@ -206,9 +205,7 @@ static int snd_rpi_wm8804_hw_params(struct snd_pcm_substream *substream,
 		"Failed to set WM8804 SYSCLK: %d\n", ret);
 		return ret;
 	}
-
 	wm8804_samplerate = samplerate;
-
 	/* set sampling frequency status bits */
 	snd_soc_component_update_bits(component, WM8804_SPDTX4, 0x0f,
 			sampling_freq);
@@ -220,11 +217,11 @@ static struct snd_soc_ops snd_rpi_wm8804_ops = {
 	.hw_params = snd_rpi_wm8804_hw_params,
 };
 
-static int snd_interlude_audio_hw_params(struct snd_pcm_substream *substream, struct snd_pcm_hw_params *params)
+static int snd_interlude_audio_hw_params(struct snd_pcm_substream *substream, 
+		struct snd_pcm_hw_params *params)
 {
 	ret = snd_rpi_wm8804_hw_params(substream, params);
 	samplerate = params_rate(params);
-
 	switch (samplerate) {
 	case 44100:
 		gpiod_set_value_cansleep(led_gpio_1, 1);
@@ -308,7 +305,6 @@ static struct snd_rpi_wm8804_drvdata drvdata_iqaudio_digi = {
 static int snd_allo_digione_probe(struct platform_device *pdev)
 {
 	pr_debug("%s\n", __func__);
-
 	if (IS_ERR(snd_clk44gpio) || IS_ERR(snd_clk48gpio)) {
 		dev_err(&pdev->dev, "devm_gpiod_get() failed\n");
 		return -EINVAL;
@@ -397,17 +393,13 @@ static struct snd_soc_dai_link snd_interlude_audio_digital_dai[] = {
 static int snd_interlude_audio_digital_probe(struct platform_device *pdev)
 {
 	pr_debug("%s\n", __func__);
-
 	if (IS_ERR(snd_clk44gpio) || IS_ERR(snd_clk48gpio))
 		return 0;
-
 	snd_interlude_audio_digital_dai->name = "Interlude Audio Digital";
 	snd_interlude_audio_digital_dai->stream_name = "Interlude Audio Digital HiFi";
-	
 	led_gpio_1 = devm_gpiod_get(&pdev->dev, "led1", GPIOD_OUT_LOW);
 	led_gpio_2 = devm_gpiod_get(&pdev->dev, "led2", GPIOD_OUT_LOW);
 	led_gpio_3 = devm_gpiod_get(&pdev->dev, "led3", GPIOD_OUT_LOW);
-
 	return 0;
 }
 
@@ -443,16 +435,13 @@ static int snd_rpi_wm8804_probe(struct platform_device *pdev)
 {
 	int ret = 0;
 	const struct of_device_id *of_id;
-
 	snd_rpi_wm8804.dev = &pdev->dev;
 	of_id = of_match_node(snd_rpi_wm8804_of_match, pdev->dev.of_node);
-
 	if (pdev->dev.of_node && of_id->data) {
 		struct device_node *i2s_node;
 		struct snd_rpi_wm8804_drvdata *drvdata =
 			(struct snd_rpi_wm8804_drvdata *) of_id->data;
 		struct snd_soc_dai_link *dai = drvdata->dai;
-
 		snd_soc_card_set_drvdata(&snd_rpi_wm8804, drvdata);
 
 		if (!dai->ops)
