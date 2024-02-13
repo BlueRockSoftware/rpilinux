@@ -90,7 +90,7 @@ static const char * const wm8805_input_select_text[] = {
 };
 
 static const unsigned int wm8805_input_channel_select_value[] = {
-	0 ,1 ,2 ,3 ,4 ,5 ,6 ,7
+	0, 1, 2, 3, 4, 5, 6, 7
 };
 
 static const struct soc_enum wm8805_input_channel_sel[] = {
@@ -217,7 +217,7 @@ static struct snd_soc_ops snd_rpi_wm8804_ops = {
 	.hw_params = snd_rpi_wm8804_hw_params,
 };
 
-static int snd_interlude_audio_hw_params(struct snd_pcm_substream *substream, 
+static int snd_interlude_audio_hw_params(struct snd_pcm_substream *substream,
 		struct snd_pcm_hw_params *params)
 {
 	ret = snd_rpi_wm8804_hw_params(substream, params);
