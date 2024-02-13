@@ -163,7 +163,6 @@ static int snd_rpi_wm8804_hw_params(struct snd_pcm_substream *substream,
 	/* clear until all clocks are setup properly */
 	wm8804_samplerate = 0;
 	snd_rpi_wm8804_clk_cfg(samplerate, &clk_cfg);
-
 	pr_debug("%s samplerate: %d mclk_freq: %u mclk_div: %u sysclk: %u\n",
 			__func__, samplerate, clk_cfg.mclk_freq,
 			clk_cfg.mclk_div, clk_cfg.sysclk_freq);
@@ -174,45 +173,26 @@ static int snd_rpi_wm8804_hw_params(struct snd_pcm_substream *substream,
 		break;
 	case 44100:
 		sampling_freq = 0x00;
-		gpiod_set_value_cansleep(led_gpio_1, 1);
-		gpiod_set_value_cansleep(led_gpio_2, 0);
-		gpiod_set_value_cansleep(led_gpio_3, 0);
 		break;
 	case 48000:
 		sampling_freq = 0x02;
-		gpiod_set_value_cansleep(led_gpio_1, 1);
-		gpiod_set_value_cansleep(led_gpio_2, 0);
-		gpiod_set_value_cansleep(led_gpio_3, 0);
 		break;
 	case 88200:
 		sampling_freq = 0x08;
-		gpiod_set_value_cansleep(led_gpio_1, 0);
-		gpiod_set_value_cansleep(led_gpio_2, 1);
-		gpiod_set_value_cansleep(led_gpio_3, 0);
 		break;
 	case 96000:
 		sampling_freq = 0x0a;
-		gpiod_set_value_cansleep(led_gpio_1, 0);
-		gpiod_set_value_cansleep(led_gpio_2, 1);
-		gpiod_set_value_cansleep(led_gpio_3, 0);
 		break;
 	case 176400:
 		sampling_freq = 0x0c;
-		gpiod_set_value_cansleep(led_gpio_1, 0);
-		gpiod_set_value_cansleep(led_gpio_2, 0);
-		gpiod_set_value_cansleep(led_gpio_3, 1);
 		break;
 	case 192000:
 		sampling_freq = 0x0e;
-		gpiod_set_value_cansleep(led_gpio_1, 0);
-		gpiod_set_value_cansleep(led_gpio_2, 0);
-		gpiod_set_value_cansleep(led_gpio_3, 1);
 		break;
 	default:
 		dev_err(rtd->card->dev,
 		"Failed to set WM8804 SYSCLK, unsupported samplerate %d\n",
 		samplerate);
-
 	}
 
 	snd_soc_dai_set_clkdiv(codec_dai, WM8804_MCLK_DIV, clk_cfg.mclk_div);
@@ -238,6 +218,52 @@ static int snd_rpi_wm8804_hw_params(struct snd_pcm_substream *substream,
 
 static struct snd_soc_ops snd_rpi_wm8804_ops = {
 	.hw_params = snd_rpi_wm8804_hw_params,
+};
+
+static int snd_interlude_audio_hw_params(struct snd_pcm_substream *substream, struct snd_pcm_hw_params *params)
+{
+	ret = snd_rpi_wm8804_hw_params(substream, params);
+	samplerate = params_rate(params);
+
+	switch (samplerate) {
+	case 44100:
+		gpiod_set_value_cansleep(led_gpio_1, 1);
+		gpiod_set_value_cansleep(led_gpio_2, 0);
+		gpiod_set_value_cansleep(led_gpio_3, 0);
+		break;
+	case 48000:
+		gpiod_set_value_cansleep(led_gpio_1, 1);
+		gpiod_set_value_cansleep(led_gpio_2, 0);
+		gpiod_set_value_cansleep(led_gpio_3, 0);
+		break;
+	case 88200:
+		gpiod_set_value_cansleep(led_gpio_1, 0);
+		gpiod_set_value_cansleep(led_gpio_2, 1);
+		gpiod_set_value_cansleep(led_gpio_3, 0);
+		break;
+	case 96000:
+		gpiod_set_value_cansleep(led_gpio_1, 0);
+		gpiod_set_value_cansleep(led_gpio_2, 1);
+		gpiod_set_value_cansleep(led_gpio_3, 0);
+		break;
+	case 176400:
+		gpiod_set_value_cansleep(led_gpio_1, 0);
+		gpiod_set_value_cansleep(led_gpio_2, 0);
+		gpiod_set_value_cansleep(led_gpio_3, 1);
+		break;
+	case 192000:
+		gpiod_set_value_cansleep(led_gpio_1, 0);
+		gpiod_set_value_cansleep(led_gpio_2, 0);
+		gpiod_set_value_cansleep(led_gpio_3, 1);
+		break;
+	default:
+		break;
+	}
+	return ret;
+}
+
+static struct snd_soc_dai_ops interlude_audio_digital_dai_ops{
+	.hw_params = snd_interlude_audio_hw_params
 };
 
 SND_SOC_DAILINK_DEFS(justboom_digi,
@@ -362,6 +388,7 @@ static struct snd_soc_dai_link snd_interlude_audio_digital_dai[] = {
 	.name        = "Interlude Audio Digital",
 	.stream_name = "Interlude Audio Digital HiFi",
 	.init        = snd_interlude_audio_init,
+	.ops		 = interlude_audio_digital_dai_ops,
 	SND_SOC_DAILINK_REG(interlude_audio_digital),
 },
 };
@@ -377,6 +404,10 @@ static int snd_interlude_audio_digital_probe(struct platform_device *pdev)
 	snd_interlude_audio_digital_dai->name = "Interlude Audio Digital";
 	snd_interlude_audio_digital_dai->stream_name = "Interlude Audio Digital HiFi";
 	
+	led_gpio_1 = devm_gpiod_get(&pdev->dev, "led1", GPIOD_OUT_LOW);
+	led_gpio_2 = devm_gpiod_get(&pdev->dev, "led2", GPIOD_OUT_LOW);
+	led_gpio_3 = devm_gpiod_get(&pdev->dev, "led3", GPIOD_OUT_LOW);
+
 	return 0;
 }
 
@@ -474,16 +505,12 @@ static int snd_rpi_wm8804_probe(struct platform_device *pdev)
 		snd_clk48gpio =
 			devm_gpiod_get(&pdev->dev, "clock48", GPIOD_OUT_LOW);
 
-		led_gpio_1 = devm_gpiod_get(&pdev->dev, "led1", GPIOD_OUT_LOW);
-		led_gpio_2 = devm_gpiod_get(&pdev->dev, "led2", GPIOD_OUT_LOW);
-		led_gpio_3 = devm_gpiod_get(&pdev->dev, "led3", GPIOD_OUT_LOW);
 		custom_reset = devm_gpiod_get(&pdev->dev, "reset", GPIOD_OUT_LOW);
 		gpiod_set_value_cansleep(custom_reset, 0);
 		mdelay(10);
 		gpiod_set_value_cansleep(custom_reset, 1);
 		if(of_property_read_u32(pdev->dev.of_node, "sys_clk", &sysclk_freq))
 		{
-			pr_err("Failed to get sys_clk, defaulting to 27MHz");
 			sysclk_freq = 27000000;
 		}
 		pr_info("Setting system clock to %d kHz", sysclk_freq/1000);
