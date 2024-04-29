@@ -96,7 +96,7 @@
  #define ES9039Q2M_INTERRUPT_SOURCES_1      0xEA
  #define ES9039Q2M_INTERRUPT_SOURCES_2      0xEB
  #define ES9039Q2M_RATIO_VALID_READ         0xEF
- #define ES9039Q2M_GPIO_READ                0xF0
+ #define ES9039Q2M_GPIO_READ_ONLY           0xF0
  #define ES9039Q2M_VOL_MIN_READ             0xF1
  #define ES9039Q2M_AUTOMUTE_READ            0xF2
  #define ES9039Q2M_SOFT_RAMP_UP_READ        0xF3
@@ -113,7 +113,7 @@
  extern const struct dev_pm_ops es9039q2m_pm;
 
  int es9039q2m_probe(struct device *dev, struct regmap *regmap);
- voide es9039q2m_remove(struct device *dev);
+ void es9039q2m_remove(struct device *dev);
 
  #endif /* _es9039q2m_H */
 

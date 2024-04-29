@@ -27,13 +27,13 @@ static int es9039q2m_i2c_probe(struct i2c_client *i2c)
 }
 
 static void es9039q2m_i2c_remove(struct i2c_client *i2c)
-(
+{
     es9039q2m_remove(&i2c->dev);
-)
+}
 
 static const struct i2c_device_id es9039q2m_i2c_id[] = {
-    { "es9039q2m" , 0 },
-    { }
+	{ "es9039q2m", 0 },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c,es9039q2m_i2c_id);
 
@@ -52,7 +52,7 @@ static struct i2c_driver es9039q2m_i2c_driver = {
         .of_match_table = of_match_ptr(es9039q2m_of_match),
     },
     .probe_new = es9039q2m_i2c_probe,
-    .remove = es9039q2m_remove,
+    .remove = es9039q2m_i2c_remove,
     .id_table = es9039q2m_i2c_id
 };
 

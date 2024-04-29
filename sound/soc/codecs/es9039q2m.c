@@ -28,6 +28,9 @@
 #include "es9039q2m.h"
 
 #define ES9039Q2M_NUM_SUPPLIES 3
+#define clk22 2257920000
+#define clk24 2457600000
+int sysclk_freq = 0;
 static const char *es9039q2m_supply_names[ES9039Q2M_NUM_SUPPLIES] = {
     "VCCA",
     "DVDD",
@@ -88,7 +91,10 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
         struct notifier_block disable_nb[ES9039Q2M_NUM_SUPPLIES];
         int mclk_div;
         struct gpio_desc *reset;
-    }
+        struct gpio_desc *clock22;
+        struct gpio_desc *clock24;
+        int rate;
+    };
 
     static bool es9039q2m_volatile(struct device *dev, unsigned int reg)
     {
@@ -113,7 +119,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
             default: 
                 return false;
         }
-    }
+    };
 
     static const DECLARE_TLV_DB_SCALE(volume_tlv, -12750, 50, 1);
 
@@ -125,16 +131,22 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
 
     };
 
+
     static int es9039q2m_software_reset(struct es9039q2m_priv *es9039q2m)
     {
-        return regmap_update_bits(es9039q2m->regmap, ES9039Q2M_SYS_CFG, 0x8, 0x1);
+        return regmap_update_bits(es9039q2m->regmap, ES9039Q2M_SYS_CFG, 0x8, 1);
+    }
+    
+    static int es9039q2m_start_dac(struct es9039q2m_priv *es9039q2m)
+    {
+        return regmap_update_bits(es9039q2m->regmap, ES9039Q2M_SYS_CFG, 0x02, 1);
     }
 
     static int es9039q2m_set_format(struct snd_soc_dai *dai, unsigned int fmt)
     {
         struct snd_soc_component *component;
         u8 master, blck_inv, lrclk_inv;
-        component = dai->conponent;
+        component = dai->component;
 
         switch(fmt & SND_SOC_DAIFMT_FORMAT_MASK){
             case SND_SOC_DAIFMT_I2S:
@@ -171,7 +183,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
                 blck_inv = 1;
                 break;
             default:
-                dev_err("unkown polarity \n")
+                dev_err(dai->dev,"unkown polarity \n");
                 return -EINVAL;
         }
 
@@ -193,7 +205,9 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
     {
         struct snd_soc_component *component;
         u8 word_length;
-        
+        int sample_rate;
+        int bclk_div;
+
         component = dai->component;
 
         switch(params_width(params)) {
@@ -212,15 +226,22 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
             return -EINVAL;
         } 
 
-        snd_soc_component_update_bits(component, ES9039Q2M_MASTER_ENCODER_CFG, 0x18, word_length << 4)
+        snd_soc_component_update_bits(component, ES9039Q2M_MASTER_ENCODER_CFG, 0x18, word_length << 4);
+
+        if(!sysclk_freq){
+            return -EINVAL;
+            dev_err(dai->dev,"sysclk_freq not set\n");
+        }
+        sample_rate = params_rate(params);
+        bclk_div = ((sysclk_freq / ((sample_rate * 2) * 32) )- 1);
+        snd_soc_component_update_bits(component, ES9039Q2M_CLK_CFG, 0xff, bclk_div);
 
         return 0;
-
     }
 
 
     static const struct snd_soc_dai_ops es9039q2m_ops = {
-        .hw_prams = es9039q2m_hw_params,
+        .hw_params = es9039q2m_hw_params,
         .set_fmt = es9039q2m_set_format,
 
     };
@@ -228,7 +249,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
     #define ES9039Q2M_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE )
 
     static struct snd_soc_dai_driver ES9039Q2M_dai = {
-        .name = "ES9039Q2M-dai"
+        .name = "es9039q2m-dac",
         .playback = {
             .stream_name = "PLayback",
             .channels_min = 2,
@@ -237,7 +258,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
             .rate_max = 768000,
             .formats = ES9039Q2M_FORMATS,
         },
-        .ops = es9039q2m_ops,
+        .ops = &es9039q2m_ops,
         };
 
     static const struct snd_soc_dapm_widget es9039q2m_dapm_widgets[] = {
@@ -257,7 +278,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
 
     static struct snd_soc_component_driver es9039q2m_dac_codec_driver = {
         .controls = es9039q2m_dac_controls,
-        .num_controls = ARRAY_SIZE(es9039q2m_dac_controls)
+        .num_controls = ARRAY_SIZE(es9039q2m_dac_controls),
         .dapm_widgets = es9039q2m_dapm_widgets,
         .num_dapm_widgets = ARRAY_SIZE(es9039q2m_dapm_widgets),
         .dapm_routes = es9039q2m_dapm_routes,
@@ -266,37 +287,67 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
 
         };
     
-    static const struct regmap_config es9039q2m_regmap_config = {
+    const struct regmap_config es9039q2m_regmap_config = {
         .reg_bits = 8,
         .val_bits = 8,
-
         .max_register = ES9039Q2M_MAX_REGISTER,
         .volatile_reg = es9039q2m_volatile,
         .reg_defaults = es9039q2m_reg_defaults,
         .num_reg_defaults = ARRAY_SIZE(es9039q2m_reg_defaults),
-
         .cache_type = REGCACHE_RBTREE,
 
-    }
+    };
+    EXPORT_SYMBOL_GPL(es9039q2m_regmap_config);
 
+     void es9039q2m_remove(struct device *dev)
+    {
+        struct es9039q2m_priv *es9039q2m = dev_get_drvdata(dev);
+
+        pm_runtime_disable(dev);
+        pm_runtime_set_suspended(dev);
+
+        regulator_bulk_disable(ARRAY_SIZE(es9039q2m->supplies), es9039q2m->supplies);
+
+        if(es9039q2m->reset)
+            gpiod_set_value_cansleep(es9039q2m->reset, 0);
+
+        dev_set_drvdata(dev,NULL);
+    }
+    EXPORT_SYMBOL_GPL(es9039q2m_remove);
     int es9039q2m_probe(struct device *dev, struct regmap *regmap)
     {
         struct es9039q2m_priv *es9039q2m;
         unsigned int id1;
         int i, ret;
 
-        es9039q2m = devm_kzalloc(dev,sizeof(*es9039q2m), GPP_KERNEL);
+        es9039q2m = devm_kzalloc(dev,sizeof(*es9039q2m), GFP_KERNEL);
         if(!es9039q2m)
             return -ENOMEM;
 
         dev_set_drvdata(dev,es9039q2m);
 
-        es9039q2m -> dev;
+        es9039q2m->dev;
         es9039q2m->regmap = regmap;
 
-        es9039q2m -> reset = devm_gpiod_get_optional(dev,"wlf,reset",GPIOD_OUT_LOW);
+        es9039q2m -> clock22 = devm_gpiod_get_optional(dev,"clock22",GPIOD_OUT_LOW);
+        if(IS_ERR(es9039q2m->clock22)){
+            ret = PTR_ERR(es9039q2m->clock22);
+            dev_err(dev,"failed to get clock22 line: %d\n",ret);
+            return ret;
+        }
+        es9039q2m -> clock24 = devm_gpiod_get_optional(dev,"clock24",GPIOD_OUT_LOW);
+        if (IS_ERR(es9039q2m->clock24)){
+            ret = PTR_ERR(es9039q2m->clock24);
+            dev_err(dev,"failed to get clock24 line: %d\n",ret);
+            return ret;
+        }
+        gpiod_direction_output(es9039q2m->clock24,1);
+        sysclk_freq = clk24;
+
+        es9039q2m -> reset = devm_gpiod_get_optional(dev,"reset",GPIOD_OUT_LOW);
+        
         if(IS_ERR(es9039q2m->reset)){
-            ret = PIR_ERR(es9039q2m->reset);
+            ret = PTR_ERR(es9039q2m->reset);
             dev_err(dev,"failed to get reset line from : %d\n",ret);
             return ret;
         }
@@ -323,11 +374,21 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
             ret = es9039q2m_software_reset(es9039q2m);
             if(ret < 0 ){
                 dev_err(dev,"Software reset failed: %d\n",ret);
-                returm ret;
+                return ret;
             }
         }
 
+        ret = es9039q2m_start_dac(es9039q2m);
+        if(ret){
+            dev_err(dev,"failed to start DAC: %d\n",ret);
+            return ret;
+        }
+
         ret = devm_snd_soc_register_component(dev, &es9039q2m_dac_codec_driver, &ES9039Q2M_dai, 1);
+        if(ret){
+            dev_err(dev,"failed to register component: %d\n",ret);
+            return ret;
+        }
 
         pm_runtime_set_active(dev);
         pm_runtime_enable(dev);
@@ -337,13 +398,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
 
 
     }
-    EXPORT_SYMBOL_GPL(ES9039A2M_probe);
-
-    void es9039q2m_remove(struct device *dev)
-    {
-        pm_runtime_disable(dev);
-    }
-    EXPORT_SYMBOL_GPL(ES9039Q2M_remove);
+    EXPORT_SYMBOL_GPL(es9039q2m_probe);
 
     #if IS_ENABLED(CONFIG_PM)
     static int es9039q2m_runtime_resune(struct device *dev)
