@@ -12,6 +12,8 @@
 
 #include <linux/regmap.h>
 
+extern const struct of_device_id es9039q2m_dt_ids[];
+
 /*
  * Register values.
  */

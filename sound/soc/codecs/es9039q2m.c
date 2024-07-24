@@ -10,11 +10,13 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
-#include <linux/gpio/consumer.h>
+#include <linux/gpio.h>
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/pm_runtime.h>
 #include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/of_gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <sound/core.h>
@@ -27,10 +29,12 @@
 
 #include "es9039q2m.h"
 
+#define ES9039Q2M_PCM_RATES SNDRV_PCM_RATE_8000_192000
 #define ES9039Q2M_NUM_SUPPLIES 3
-#define clk22 2257920000
-#define clk24 2457600000
-int sysclk_freq = 0;
+#define clk22 22579200UL
+#define clk24 24576000UL
+//int sysclk_freq = 0;
+
 static const char *es9039q2m_supply_names[ES9039Q2M_NUM_SUPPLIES] = {
     "VCCA",
     "DVDD",
@@ -39,7 +43,6 @@ static const char *es9039q2m_supply_names[ES9039Q2M_NUM_SUPPLIES] = {
 
 static const struct reg_default es9039q2m_reg_defaults[] = {
     {ES9039Q2M_DAC_CLK_CFG, 0x80},
-    {ES9039Q2M_CLK_CFG, 0x07},
     {ES9039Q2M_GPIO12_CFG, 0x7D},
     {ES9039Q2M_GPIO34_CFG, 0x00},
     {ES9039Q2M_GPIO56_CFG, 0x00},
@@ -60,8 +63,6 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
     {ES9039Q2M_PWM3_FREQ_2, 0x00},
     {ES9039Q2M_CH1_SLOT_CFG, 0x00},
     {ES9039Q2M_CH2_SLOT_CFG, 0x61},
-    {ES9039Q2M_CH1_VOLUME, 0x00},
-    {ES9039Q2M_CH2_VOLUME, 0x00},
     {ES9039Q2M_DAC_VOL_UP_RATE, 0x04},
     {ES9039Q2M_DAC_VOL_DOWN_RATE, 0x04},
     {ES9039Q2M_DAC_VOL_DOWN_RATE_FAST, 0xFF},
@@ -90,10 +91,11 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
         struct regulator_bulk_data supplies[ES9039Q2M_NUM_SUPPLIES];
         struct notifier_block disable_nb[ES9039Q2M_NUM_SUPPLIES];
         int mclk_div;
-        struct gpio_desc *reset;
-        struct gpio_desc *clock22;
-        struct gpio_desc *clock24;
+        int gpio_reset;
+        int gpio_clock22;
+        int gpio_clock24;
         int rate;
+        int sysclk_freq;
     };
 
     static bool es9039q2m_volatile(struct device *dev, unsigned int reg)
@@ -124,9 +126,9 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
     static const DECLARE_TLV_DB_SCALE(volume_tlv, -12750, 50, 1);
 
     static const struct snd_kcontrol_new es9039q2m_dac_controls[] = {
-        SOC_DOUBLE_R_TLV("Master Playback Volume", ES9039Q2M_CH1_VOLUME, ES9039Q2M_CH2_VOLUME,
+        SOC_DOUBLE_R_TLV("Channel 1 Playback Volume", ES9039Q2M_CH1_VOLUME, ES9039Q2M_CH2_VOLUME,
 		     0, 255, 1, volume_tlv),
-        SOC_DOUBLE_R_TLV("Digital Playback Volume", ES9039Q2M_CH1_VOLUME, ES9039Q2M_CH2_VOLUME,
+        SOC_DOUBLE_R_TLV("Channel 2 Playback Volume", ES9039Q2M_CH1_VOLUME, ES9039Q2M_CH2_VOLUME,
 		     0, 255, 1, volume_tlv),
 
     };
@@ -139,7 +141,8 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
     
     static int es9039q2m_start_dac(struct es9039q2m_priv *es9039q2m)
     {
-        return regmap_update_bits(es9039q2m->regmap, ES9039Q2M_SYS_CFG, 0x02, 1);
+        printk(KERN_EMERG "starting DAC");
+        return regmap_update_bits(es9039q2m->regmap, ES9039Q2M_SYS_CFG, 0xFF, 0x02);
     }
 
     static int es9039q2m_set_format(struct snd_soc_dai *dai, unsigned int fmt)
@@ -158,6 +161,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
 
         switch(fmt & SND_SOC_DAIFMT_MASTER_MASK) {
             case SND_SOC_DAIFMT_CBM_CFM:
+                printk("setting ess9039q2m to master mode");
                 master = 1;
                 break;
             case SND_SOC_DAIFMT_CBS_CFS:
@@ -167,7 +171,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
                 dev_err(dai->dev,"unkown master/slave configuration");
                 return -EINVAL;    
         }
-        snd_soc_component_update_bits(component, ES9039Q2M_INPUT_SEL, 0x06, master << 4);
+        snd_soc_component_update_bits(component, ES9039Q2M_INPUT_SEL, 0x10, master << 4);
 
         blck_inv = lrclk_inv = 0;
         switch (fmt & SND_SOC_DAIFMT_INV_MASK){
@@ -201,14 +205,43 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
         return 0;
     }
 
+    static unsigned int snd_es9039q2m_clock_switch(unsigned int samplerate, struct es9039q2m_priv *drvdata){
+        switch (samplerate){
+        case 11025:
+        case 22050:
+        case 44100:
+        case 88200:
+        case 176400:
+            if(drvdata->sysclk_freq == clk22){
+                return drvdata->sysclk_freq;
+            }
+            else{
+                gpio_set_value(drvdata->gpio_clock22,1);
+                gpio_set_value(drvdata->gpio_clock24,0);
+                drvdata->sysclk_freq = clk22;
+                return clk22;
+            }
+        default:
+            if(drvdata->sysclk_freq == clk24){
+                return drvdata->sysclk_freq;
+            }
+            else{
+                gpio_set_value(drvdata->gpio_clock24,1);
+                gpio_set_value(drvdata->gpio_clock22,0);
+                return clk24;
+            }
+        }
+    }
+
     static int es9039q2m_hw_params(struct snd_pcm_substream *substream, struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
     {
-        struct snd_soc_component *component;
+        struct snd_soc_component *component = dai->component;
+        struct es9039q2m_priv *drvdata = snd_soc_component_get_drvdata(component);
         u8 word_length;
         int sample_rate;
         int bclk_div;
 
-        component = dai->component;
+        sample_rate = params_rate(params);
 
         switch(params_width(params)) {
         
@@ -227,14 +260,19 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
         } 
 
         snd_soc_component_update_bits(component, ES9039Q2M_MASTER_ENCODER_CFG, 0x18, word_length << 4);
-
-        if(!sysclk_freq){
+        if(gpio_is_valid(drvdata->gpio_clock22)&& gpio_is_valid(drvdata->gpio_clock24))
+        {
+            drvdata->sysclk_freq = snd_es9039q2m_clock_switch(sample_rate, drvdata);
+            dev_info(dai->dev,"dual clock mode active");
+        }
+        
+        if(!drvdata->sysclk_freq){
             return -EINVAL;
             dev_err(dai->dev,"sysclk_freq not set\n");
         }
-        sample_rate = params_rate(params);
-        bclk_div = ((sysclk_freq / ((sample_rate * 2) * 32) )- 1);
-        snd_soc_component_update_bits(component, ES9039Q2M_CLK_CFG, 0xff, bclk_div);
+        bclk_div = ((drvdata->sysclk_freq / ((sample_rate * 2) * 32) )- 1);
+        printk(KERN_EMERG "sample-rate: %d, bclk_div: %d, sysclk_frq: %d\n",sample_rate,bclk_div,drvdata->sysclk_freq);
+        regmap_update_bits(drvdata->regmap, ES9039Q2M_CLK_CFG, 0xFF, bclk_div);
 
         return 0;
     }
@@ -254,8 +292,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
             .stream_name = "PLayback",
             .channels_min = 2,
             .channels_max = 2,
-            .rate_min = 8000,
-            .rate_max = 768000,
+            .rates = ES9039Q2M_PCM_RATES,
             .formats = ES9039Q2M_FORMATS,
         },
         .ops = &es9039q2m_ops,
@@ -308,48 +345,71 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
 
         regulator_bulk_disable(ARRAY_SIZE(es9039q2m->supplies), es9039q2m->supplies);
 
-        if(es9039q2m->reset)
-            gpiod_set_value_cansleep(es9039q2m->reset, 0);
+        if(es9039q2m->gpio_reset)
+            gpio_set_value(es9039q2m->gpio_reset, 0);
 
         dev_set_drvdata(dev,NULL);
     }
     EXPORT_SYMBOL_GPL(es9039q2m_remove);
-    int es9039q2m_probe(struct device *dev, struct regmap *regmap)
+
+const struct of_device_id es9039q2m_dt_ids[] = {
+    { .compatible = "ess,es9039q2m",},
+    {}
+};
+MODULE_DEVICE_TABLE(of, es9039q2m_dt_ids);
+EXPORT_SYMBOL_GPL(es9039q2m_dt_ids);
+
+int es9039q2m_probe(struct device *dev, struct regmap *regmap)
     {
         struct es9039q2m_priv *es9039q2m;
         unsigned int id1;
         int i, ret;
-
+        printk(KERN_EMERG "hello from es9039q2m probe");
         es9039q2m = devm_kzalloc(dev,sizeof(*es9039q2m), GFP_KERNEL);
         if(!es9039q2m)
             return -ENOMEM;
 
         dev_set_drvdata(dev,es9039q2m);
-
-        es9039q2m->dev;
         es9039q2m->regmap = regmap;
-
-        es9039q2m -> clock22 = devm_gpiod_get_optional(dev,"clock22",GPIOD_OUT_LOW);
-        if(IS_ERR(es9039q2m->clock22)){
-            ret = PTR_ERR(es9039q2m->clock22);
-            dev_err(dev,"failed to get clock22 line: %d\n",ret);
-            return ret;
+        if(of_property_read_u32(dev->of_node,"sys-clk",&es9039q2m->sysclk_freq))
+        {
+            printk(KERN_EMERG "es9039q2m: no sys-clk property found in device tree\n");
+            es9039q2m -> gpio_clock22 = of_get_named_gpio(dev->of_node,"clock22",0);
+            if(gpio_is_valid(es9039q2m->gpio_clock22))
+            {   gpio_direction_output(es9039q2m->gpio_clock22,0);
+                ret = devm_gpio_request(dev, es9039q2m->gpio_clock22,"CLOCK 22");
+                if(ret < 0)
+                    dev_info(dev,"no gpio line for clock 22");
+            }
+            es9039q2m -> gpio_clock24 = of_get_named_gpio(dev->of_node,"clock24",0);
+            if(gpio_is_valid(es9039q2m->gpio_clock24))
+            {   gpio_direction_output(es9039q2m->gpio_clock24,0);
+                ret = devm_gpio_request(dev, es9039q2m->gpio_clock24,"CLOCK 24");
+                if(ret < 0)
+                    dev_info(dev,"no gpio line for clock 24");
+            } 
         }
-        es9039q2m -> clock24 = devm_gpiod_get_optional(dev,"clock24",GPIOD_OUT_LOW);
-        if (IS_ERR(es9039q2m->clock24)){
-            ret = PTR_ERR(es9039q2m->clock24);
-            dev_err(dev,"failed to get clock24 line: %d\n",ret);
-            return ret;
-        }
-        gpiod_direction_output(es9039q2m->clock24,1);
-        sysclk_freq = clk24;
 
-        es9039q2m -> reset = devm_gpiod_get_optional(dev,"reset",GPIOD_OUT_LOW);
-        
-        if(IS_ERR(es9039q2m->reset)){
-            ret = PTR_ERR(es9039q2m->reset);
-            dev_err(dev,"failed to get reset line from : %d\n",ret);
-            return ret;
+        if(es9039q2m->sysclk_freq <= 0){
+            if(gpio_is_valid(es9039q2m->gpio_clock24)){
+                    gpio_set_value(es9039q2m->gpio_clock24,1);
+                    printk(KERN_EMERG "es9039q2m: using 24Mhz clock\n");
+                    es9039q2m->sysclk_freq = clk24;
+            }
+            else {
+            dev_err(dev,"error getting clock gpios and systen clock frequency defaultinh to 27Mhz");
+            es9039q2m->sysclk_freq = 27000000;
+            }
+        }
+
+        printk(KERN_EMERG "es9039q2m: sysclk_freq: %d\n",es9039q2m->sysclk_freq);
+
+        es9039q2m->gpio_reset = of_get_named_gpio(dev->of_node,"reset",0);
+        if(gpio_is_valid(es9039q2m->gpio_reset)){
+            ret = devm_gpio_request(dev, es9039q2m->gpio_reset,"ES9039Q2M reset");
+            if(ret < 0)
+                dev_err(dev,"error getting reset line");
+
         }
 
         for(i=0; i < ARRAY_SIZE(es9039q2m->supplies); i++)
@@ -362,15 +422,16 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
             return ret;
         }
         
-        gpiod_set_value_cansleep(es9039q2m->reset, 1);
+        gpio_set_value(es9039q2m->gpio_reset, 1);
 
         ret = regmap_read(regmap, ES9039Q2M_CHIP_ID_READ, &id1 );
-        if(ret != 0x63) {
+        printk(KERN_EMERG "es9039q2m: device ID: %d\n",id1);
+       if(id1 != 0x63) {
             dev_err(dev,"failed to read device ID: %d\n",ret);
             return ret;
         }
 
-        if(!es9039q2m->reset){
+        if(!es9039q2m->gpio_reset){
             ret = es9039q2m_software_reset(es9039q2m);
             if(ret < 0 ){
                 dev_err(dev,"Software reset failed: %d\n",ret);
@@ -386,6 +447,7 @@ static const struct reg_default es9039q2m_reg_defaults[] = {
 
         ret = devm_snd_soc_register_component(dev, &es9039q2m_dac_codec_driver, &ES9039Q2M_dai, 1);
         if(ret){
+            printk(KERN_EMERG "es9039q2m: failed to register component: %d\n",ret);
             dev_err(dev,"failed to register component: %d\n",ret);
             return ret;
         }

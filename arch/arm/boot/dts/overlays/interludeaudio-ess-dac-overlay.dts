@@ -1,0 +1,65 @@
+// Definitions for Interlude audio analog hat
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target = <&sound>;
+		__overlay__ {
+			compatible = "simple-audio-card";
+			i2s-controller = <&i2s_clk_consumer>;
+			status = "okay";
+
+			simple-audio-card,name = "snd_interlude_audio_ESS_DAC";
+
+			simple-audio-card,widgets =
+				"Line", "Line Out";
+
+			simple-audio-card,routing =
+				"Line Out","DACL",
+				"Line Out","DACR";
+
+			simple-audio-card,format = "i2s";
+
+			simple-audio-card,bitclock-master = <&sound_master>;
+			simple-audio-card,frame-master = <&sound_master>;
+
+			simple-audio-card,cpu {
+				sound-dai = <&i2s_clk_consumer>;
+			};
+
+			sound_master: simple-audio-card,codec {
+				sound-dai = <&es9039q2m>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&i2s_clk_consumer>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+    
+	fragment@2 {
+		target = <&i2c1>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			es9039q2m: es9039q2m@48 {
+				#sound-dai-cells = <0>;
+				compatible = "ess,es9039q2m";
+				reg = <0x48>;
+				status = "okay";
+				clock22 = <&gpio 22 0>;
+				clock24 = <&gpio 27 0>;
+				reset = <&gpio 24 0>; /* Pin 26, active high */
+			};
+		};
+	};
+
+};

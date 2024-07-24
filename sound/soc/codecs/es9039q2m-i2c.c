@@ -37,25 +37,14 @@ static const struct i2c_device_id es9039q2m_i2c_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c,es9039q2m_i2c_id);
 
-#if defined(CONFIG_OF)
-static const struct of_device_id es9039q2m_of_match[] = {
-    { .compatible = "ess,es9039q2m", },
-    { }
-};
-MODULE_DEVICE_TABLE(of,es9039q2m_of_match);
-#endif
-
 static struct i2c_driver es9039q2m_i2c_driver = {
     .driver = {
         .name = "es9039q2m",
-        .pm = &es9039q2m_pm,
-        .of_match_table = of_match_ptr(es9039q2m_of_match),
+        .of_match_table = of_match_ptr(es9039q2m_dt_ids),
     },
     .probe_new = es9039q2m_i2c_probe,
-    .remove = es9039q2m_i2c_remove,
     .id_table = es9039q2m_i2c_id
 };
-
 module_i2c_driver(es9039q2m_i2c_driver);
 
 MODULE_DESCRIPTION("ASoC ES9039Q2M driver - I2C");
